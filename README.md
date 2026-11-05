@@ -11,7 +11,8 @@ KOS 平台项目：作者 SDK、清单结构与打包工具 — 扩展与应用�
 | `manifest/` | 清单结构：扩展声明、`App` 清单与声明校验 | `SDK-C-3`，引用 `KOSD-C-18`、`KOSD-C-73` |
 | `extension/` | 扩展接口：对象类与控制器声明面 | `SDK-C-1`，引用 `KOSD-C-19`、`KOSD-C-20` |
 | `app/` | 应用接口：握手、postMessage 校验与权限 | `SDK-C-1`，引用 `KOSD-C-73`、`KOSD-C-75` |
-| `validate/` | 校验问题模型，供上述两个模块共用 | — |
+| `packaging/` | 打包工具：包结构、摘要与校验 | `SDK-C-4`，引用 `KOSD-C-17` |
+| `validate/` | 校验问题模型，供上述模块共用 | — |
 | `client/` | 客户端库：控制面 API 客户端与错误包络 | `SDK-C-2`，引用 `KOSD-C-12` |
 | `tests/acceptance/<TC-id>/` | 验收用例，目录名取设计编号 | `03-acceptance.md` 的对应条目 |
 
@@ -89,6 +90,29 @@ SDK 只做结构检查；未声明的类别不出现在产物中。
 - 令牌绑定账号、应用、窗口实例、权限与到期时间，只在握手答复中出现一次。
 - 接口面不含读取控制台会话的入口：`app` 包只依赖清单类型，模块不引入集群客户端或 Cookie 存储。
 
+## 打包
+
+打包只有一条路径，第一方与第三方共用（`SDK-C-4`，引用 `KOSD-C-17`）。工具只接收清单与作者随包声明的资产，
+不读产品身份与安装来源，因此同样的清单与资产产出同样的包。
+
+包结构固定，除下列条目外不写任何内容：
+
+| 条目 | 内容 |
+|---|---|
+| `manifest.json` | 校验后的扩展声明，字段集合与 `KOSD-C-18`、`KOSD-C-73` 相同 |
+| `digest` | 包摘要，`sha256:<hex>` |
+| `assets/<path>` | 作者声明的 UI 资产，路径必须位于 `assets/` 之下 |
+
+包摘要覆盖 `manifest.json` 与全部 UI 资产：按路径排序，每条以 `<名字> <长度>\n<内容>` 计入，
+所以任一资产或清单变化都改变摘要，重命名资产也改变摘要。
+
+`Pack` 在校验失败或资产不可用时返回 `*validate.InvalidError` 且不产出包：资产路径必须位于 `assets/`
+之下且不得重复；`App` 的 `icon` 若指向包内资产，该资产必须随包提供。
+
+`Verify` 是安装路径对包所做的检查：只接受上述结构，摘要必须覆盖清单与全部资产，声明仍然有效；
+读取受预算约束，条目数与内容总字节数各有上限，超限的包按不可读拒绝且不返回部分内容，
+调用方可用 `VerifyWithLimits` 收紧预算。`expected` 按解析后的摘要比较，大小写不影响结果。
+
 ## 构建与测试
 
 ```sh
@@ -97,10 +121,11 @@ make test        # 单元与验收用例
 make acceptance  # 只跑 tests/acceptance/，-v
 ```
 
-当前验收用例：`tests/acceptance/SDK-TC-2/`（P1）、`tests/acceptance/SDK-TC-3/`（P1）、
-`tests/acceptance/SDK-TC-4/`（P0）、`tests/acceptance/SDK-TC-5/`（P1）。
+当前验收用例：`tests/acceptance/SDK-TC-1/`（P1）、`tests/acceptance/SDK-TC-2/`（P1）、
+`tests/acceptance/SDK-TC-3/`（P1）、`tests/acceptance/SDK-TC-4/`（P0）、`tests/acceptance/SDK-TC-5/`（P1）、
+`tests/acceptance/SDK-TC-6/`（P1）、`tests/acceptance/SDK-TC-8/`（P1）。
 
 ## 边界
 
 - 不定义内核语义或新增扩展点；跨项目语义引用 `KOSD-C-x`，不复制判据。
-- 打包路径与包摘要（`SDK-C-4`）不在本模块，另行交付；本模块只到清单可校验、声明被判定有效或无效。
+- 不定义安装路径行为（属 kosd）；打包工具只保证产出的包通过安装路径对包的检查。
