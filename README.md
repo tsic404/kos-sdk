@@ -10,6 +10,7 @@ KOS 平台项目：作者 SDK、清单结构与打包工具 — 扩展与应用�
 |---|---|---|
 | `manifest/` | 清单结构：扩展声明、`App` 清单与声明校验 | `SDK-C-3`，引用 `KOSD-C-18`、`KOSD-C-73` |
 | `extension/` | 扩展接口：对象类与控制器声明面 | `SDK-C-1`，引用 `KOSD-C-19`、`KOSD-C-20` |
+| `app/` | 应用接口：握手、postMessage 校验与权限 | `SDK-C-1`，引用 `KOSD-C-73`、`KOSD-C-75` |
 | `validate/` | 校验问题模型，供上述两个模块共用 | — |
 | `client/` | 客户端库：控制面 API 客户端与错误包络 | `SDK-C-2`，引用 `KOSD-C-12` |
 | `tests/acceptance/<TC-id>/` | 验收用例，目录名取设计编号 | `03-acceptance.md` 的对应条目 |
@@ -74,6 +75,20 @@ SDK 只做结构检查；未声明的类别不出现在产物中。
 - 分页与过滤参数由作者显式给出；不隐式翻页，也不合并多页结果。
 - 不缓存写请求结果，不替作者重试。
 
+## 应用接口
+
+窗口应用经 `ready` / `init` 握手取得自己的短期令牌、主题与可用能力（`KOSD-C-75`）。
+
+- `Window.Ready` 产出应用的 `ready`；`Host.Receive` 只回答来源为清单 `entry` 的 origin、发送者为所嵌入
+  窗口的 `ready`，且每个窗口实例只回答一次。origin 归一化丢弃 https 默认端口 443，其余端口保留。
+- `Host` 的答复是 `Delivery`：目标 origin 恒为应用 origin，SDK 不产出通配来源。
+- `Window.Accept` 只接受来自控制台 origin 与父窗口、结构为 `init`、令牌未过期且绑定本应用的答复。
+- 两条消息的字段集合都是封闭的：`ready` 只有 `type`；`init` 只有 `type`、`token`、`theme`、`capabilities`。
+  未知消息、来源不符与多余字段一律忽略，应用没有向控制台传递 HTML 或脚本的通道。
+- 可用能力 = 清单声明的权限 ∩ 该窗口已确认的权限，按固定集合顺序给出；未声明的权限不可用。
+- 令牌绑定账号、应用、窗口实例、权限与到期时间，只在握手答复中出现一次。
+- 接口面不含读取控制台会话的入口：`app` 包只依赖清单类型，模块不引入集群客户端或 Cookie 存储。
+
 ## 构建与测试
 
 ```sh
@@ -82,8 +97,8 @@ make test        # 单元与验收用例
 make acceptance  # 只跑 tests/acceptance/，-v
 ```
 
-当前验收用例：`tests/acceptance/SDK-TC-2/`（P1）、`tests/acceptance/SDK-TC-4/`（P0）、
-`tests/acceptance/SDK-TC-5/`（P1）。
+当前验收用例：`tests/acceptance/SDK-TC-2/`（P1）、`tests/acceptance/SDK-TC-3/`（P1）、
+`tests/acceptance/SDK-TC-4/`（P0）、`tests/acceptance/SDK-TC-5/`（P1）。
 
 ## 边界
 
