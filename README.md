@@ -12,6 +12,7 @@ KOS 平台项目：作者 SDK、清单结构与打包工具 — 扩展与应用�
 | `extension/` | 扩展接口：对象类与控制器声明面 | `SDK-C-1`，引用 `KOSD-C-19`、`KOSD-C-20` |
 | `app/` | 应用接口：握手、postMessage 校验与权限 | `SDK-C-1`，引用 `KOSD-C-73`、`KOSD-C-75` |
 | `packaging/` | 打包工具：包结构、摘要与校验 | `SDK-C-4`，引用 `KOSD-C-17` |
+| `localcheck/` | 本地一致性入口：用例集执行、摘要比对与结论 | `SDK-C-5`，引用 `CONF-AC-1`、`CONF-C-3` |
 | `validate/` | 校验问题模型，供上述模块共用 | — |
 | `client/` | 客户端库：控制面 API 客户端与错误包络 | `SDK-C-2`，引用 `KOSD-C-12` |
 | `tests/acceptance/<TC-id>/` | 验收用例，目录名取设计编号 | `03-acceptance.md` 的对应条目 |
@@ -113,6 +114,19 @@ SDK 只做结构检查；未声明的类别不出现在产物中。
 读取受预算约束，条目数与内容总字节数各有上限，超限的包按不可读拒绝且不返回部分内容，
 调用方可用 `VerifyWithLimits` 收紧预算。`expected` 按解析后的摘要比较，大小写不影响结果。
 
+## 本地一致性入口
+
+`localcheck` 让作者在本机运行与 conformance 套件相同的用例集（`SDK-C-5`，引用 `CONF-AC-1`、`CONF-C-3`）。
+入口复用套件的用例集与摘要判定，不另设通过标准：
+
+- 用例集由套件提供：每条用例带所属组（能力、Provider、扩展、应用）、它验证的契约条目、判据版本与检查。
+  入口不增删用例，报告按四组列出，逐条给出结果。
+- 用例集摘要覆盖用例集合与每条用例的判据版本，与用例的书写顺序无关；摘要与发行版记录的摘要一致时结论可比。
+- 结论取 `passed`、`failed`、`incomparable`：摘要不一致时记为不可比，同时给出运行摘要与发行版摘要，
+  不记为通过或失败；可比但存在未通过或未执行用例时记为未通过。
+- 未通过项与未执行项分列，未运行的用例不计入通过；单条用例失败不中止运行，其余用例照常给出结果。
+- 用例集不合法（空集、组越界、缺契约归属、缺判据版本、重复 id、缺检查）时不产出报告。
+
 ## 构建与测试
 
 ```sh
@@ -123,9 +137,10 @@ make acceptance  # 只跑 tests/acceptance/，-v
 
 当前验收用例：`tests/acceptance/SDK-TC-1/`（P1）、`tests/acceptance/SDK-TC-2/`（P1）、
 `tests/acceptance/SDK-TC-3/`（P1）、`tests/acceptance/SDK-TC-4/`（P0）、`tests/acceptance/SDK-TC-5/`（P1）、
-`tests/acceptance/SDK-TC-6/`（P1）、`tests/acceptance/SDK-TC-8/`（P1）。
+`tests/acceptance/SDK-TC-6/`（P1）、`tests/acceptance/SDK-TC-7/`（P2）、`tests/acceptance/SDK-TC-8/`（P1）。
 
 ## 边界
 
 - 不定义内核语义或新增扩展点；跨项目语义引用 `KOSD-C-x`，不复制判据。
 - 不定义安装路径行为（属 kosd）；打包工具只保证产出的包通过安装路径对包的检查。
+- 本地一致性入口只给出逐条结果、摘要与可比性，不替代 conformance 套件的结论，也不提供安装路径。

@@ -11,16 +11,14 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"hash"
 	"path"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/tsic404/kos-sdk/internal/framedhash"
 	"github.com/tsic404/kos-sdk/manifest"
 	"github.com/tsic404/kos-sdk/validate"
 )
@@ -146,21 +144,14 @@ func sortedAssets(assets []Asset) []Asset {
 	return ordered
 }
 
-// digestOf hashes the manifest and every asset in path order. Each record is
-// framed as "<name> <length>\n<content>", so neither a renamed asset nor a
-// shifted boundary can reproduce an earlier digest.
+// digestOf hashes the manifest and every asset in path order.
 func digestOf(manifestJSON []byte, assets []Asset) Digest {
-	h := sha256.New()
-	writeFrame(h, ManifestEntry, manifestJSON)
+	hasher := framedhash.New()
+	hasher.Add(ManifestEntry, manifestJSON)
 	for _, asset := range assets {
-		writeFrame(h, asset.Path, asset.Content)
+		hasher.Add(asset.Path, asset.Content)
 	}
-	return Digest("sha256:" + hex.EncodeToString(h.Sum(nil)))
-}
-
-func writeFrame(h hash.Hash, name string, content []byte) {
-	fmt.Fprintf(h, "%s %d\n", name, len(content))
-	h.Write(content)
+	return Digest(hasher.Sum())
 }
 
 func writeArchive(pkg Package, manifestJSON []byte) ([]byte, error) {
