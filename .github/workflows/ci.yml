@@ -1,0 +1,40 @@
+name: CI
+
+# The check a pull request can show before it is merged. The steps mirror the
+# Makefile entry points one to one, so a formatting or vet failure cannot hide
+# behind the test run.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Format and vet
+        run: make lint
+
+      - name: Unit and acceptance tests
+        run: make test
+
+      - name: Acceptance suite
+        run: make acceptance
