@@ -11,6 +11,7 @@ KOS 平台项目：作者 SDK、清单结构与打包工具 — 扩展与应用�
 | `manifest/` | 清单结构：扩展声明、`App` 清单与声明校验 | `SDK-C-3`，引用 `KOSD-C-18`、`KOSD-C-73` |
 | `extension/` | 扩展接口：对象类与控制器声明面 | `SDK-C-1`，引用 `KOSD-C-19`、`KOSD-C-20` |
 | `validate/` | 校验问题模型，供上述两个模块共用 | — |
+| `client/` | 客户端库：控制面 API 客户端与错误包络 | `SDK-C-2`，引用 `KOSD-C-12` |
 | `tests/acceptance/<TC-id>/` | 验收用例，目录名取设计编号 | `03-acceptance.md` 的对应条目 |
 
 ## 清单结构
@@ -65,6 +66,14 @@ SDK 只做结构检查；未声明的类别不出现在产物中。
   动词取 `get`、`list`、`watch`、`create`、`update`、`patch`、`delete`（`KOSD-C-20`）。
 - 两个函数在非法输入上返回 `InvalidError`，其 `Issues` 与校验结果同构。
 
+## 客户端
+
+客户端是控制面 API 的作者侧出口，只做请求构造与响应解码：
+
+- 错误包络的字段集合原样交给作者，错误代码与失败阶段不改写，可重试标记保留。
+- 分页与过滤参数由作者显式给出；不隐式翻页，也不合并多页结果。
+- 不缓存写请求结果，不替作者重试。
+
 ## 构建与测试
 
 ```sh
@@ -73,7 +82,8 @@ make test        # 单元与验收用例
 make acceptance  # 只跑 tests/acceptance/，-v
 ```
 
-当前验收用例：`tests/acceptance/SDK-TC-4/`（P0）、`tests/acceptance/SDK-TC-5/`（P1）。
+当前验收用例：`tests/acceptance/SDK-TC-2/`（P1）、`tests/acceptance/SDK-TC-4/`（P0）、
+`tests/acceptance/SDK-TC-5/`（P1）。
 
 ## 边界
 
