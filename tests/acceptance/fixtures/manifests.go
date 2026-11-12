@@ -27,84 +27,84 @@ func MinimalApp() map[string]any {
 }
 
 // MinimalExtension returns a minimal extension declaration contributing an
-// object class, a controller, a page and one App.
+// object class, a controller, a capability, a page and a preference set.
 func MinimalExtension() map[string]any {
-	return map[string]any{
-		"id":               "kos.example.files",
-		"version":          "1.0.0",
-		"frameworkVersion": ">=1.0 <2.0",
-		"contributions": map[string]any{
-			"objectClasses": []any{
-				map[string]any{
-					"apiGroup": "files.kos.example",
-					"version":  "v1alpha1",
-					"kind":     "FileShare",
-					"scope":    "Namespaced",
-				},
+	declaration := minimalDeclaration("kos.example.files")
+	declaration["apiGroup"] = "files.kos.example"
+	declaration["contributions"] = map[string]any{
+		"objectClasses": []any{
+			map[string]any{
+				"group":      "files.kos.example",
+				"kind":       "FileShare",
+				"resource":   "fileshares",
+				"versions":   []any{"v1alpha1"},
+				"namespaced": true,
 			},
-			"controllers": []any{
-				map[string]any{
-					"name": "files-controller",
-					"writeScopes": []any{
-						map[string]any{
-							"apiGroup": "files.kos.example",
-							"kind":     "FileShare",
-							"verbs":    []any{"get", "update"},
-						},
-					},
-				},
-			},
-			"capabilities":       []any{map[string]any{"name": "files.kos.example/share", "version": "v1"}},
-			"pages":              []any{map[string]any{"id": "files"}},
-			"settings":           []any{},
-			"catalogSources":     []any{},
-			"discoveryAdapters":  []any{},
-			"diagnosticAdapters": []any{},
-			"userPreferences":    map[string]any{"properties": map[string]any{"theme": "string"}},
-			"apps":               []any{MinimalApp()},
 		},
-		"dependencies": map[string]any{
-			"capabilities": []any{
-				map[string]any{
-					"name":       "storage.kos.example/volume",
-					"version":    ">=1.0",
-					"guarantees": map[string]any{"snapshot": true},
-				},
-			},
-			"components": []any{map[string]any{"id": "kos.example.storage", "version": ">=1.0"}},
-			"framework":  ">=1.0 <2.0",
-		},
-		"permissions": map[string]any{
-			"write": []any{
-				map[string]any{
-					"apiGroup":  "files.kos.example",
-					"resources": []any{"fileshares"},
-					"verbs":     []any{"create", "update"},
-				},
-			},
-			"read": []any{
-				map[string]any{"apiGroup": "storage.kos.example", "resources": []any{"volumes"}},
-			},
-			"roles":       []any{"Member"},
-			"objectRoles": map[string]any{"FileShare": []any{"Owner", "Member"}},
-		},
-		"config": map[string]any{
-			"properties": map[string]any{"path": map[string]any{"type": "string"}},
-		},
-		"status": map[string]any{
-			"component": map[string]any{"conditions": []any{"Ready"}},
-			"objectClasses": map[string]any{
-				"FileShare": map[string]any{
-					"writer":     "files-controller",
-					"conditions": []any{"Ready"},
+		"controllers": []any{
+			map[string]any{
+				"id":      "files-controller",
+				"manages": []any{map[string]any{"group": "files.kos.example", "kind": "FileShare"}},
+				"scope": map[string]any{
+					"groups": []any{"files.kos.example"},
+					"kinds":  []any{map[string]any{"kind": "ConfigMap"}},
 				},
 			},
 		},
-		"uninstallRetention": map[string]any{
-			"contributions":     map[string]any{"settings": "retain"},
-			"externalResources": []any{"files.kos.example/remote"},
+		"capabilities": map[string]any{
+			"items": []any{map[string]any{"name": "kos.example.files/share", "version": "v1"}},
+		},
+		"pages":              []any{readOnlyPage("files", "Files", "files.kos.example/v1alpha1/FileShare")},
+		"settings":           []any{},
+		"catalogueSources":   []any{},
+		"discoveryAdapters":  []any{},
+		"diagnosticAdapters": []any{},
+		"preferences":        []any{map[string]any{"id": "files.view", "keys": []any{"sort"}}},
+	}
+	declaration["dependencies"] = map[string]any{
+		"capabilities": []any{map[string]any{"name": "storage.kos.example/volume", "versions": ">=1.0"}},
+		"components":   []any{map[string]any{"identifier": "kos.example.storage", "versions": ">=1.0"}},
+	}
+	declaration["permissions"] = []any{
+		map[string]any{
+			"contribution": "FileShare",
+			"readScope": map[string]any{
+				"groups": []any{"files.kos.example"},
+				"kinds": []any{
+					map[string]any{"group": "storage.kos.example", "kind": "Volume"},
+					map[string]any{"kind": "Event"},
+				},
+			},
+			"requiredRole":  "Member",
+			"objectWriters": []any{"Owner", "Member"},
+		},
+		map[string]any{"contribution": "files", "requiredRole": "Guest"},
+	}
+	declaration["configuration"] = map[string]any{
+		"schema":        map[string]any{"properties": map[string]any{"path": map[string]any{"type": "string"}}},
+		"statusWriters": []any{"Member"},
+		"conditions":    []any{"Ready"},
+	}
+	declaration["retention"] = []any{
+		map[string]any{"resource": "settings", "keep": true},
+		map[string]any{"resource": "fileshares", "keep": false, "externalReference": "files.kos.example/remote"},
+	}
+	return declaration
+}
+
+// CoreGroupReadExtension returns a minimal extension whose only read scope is a
+// core-group kind: the group field is absent, as the kernel declares it.
+func CoreGroupReadExtension() map[string]any {
+	declaration := minimalDeclaration("kos.example.events")
+	declaration["permissions"] = []any{
+		map[string]any{
+			"contribution": "events",
+			"readScope": map[string]any{
+				"kinds": []any{map[string]any{"kind": "Event"}},
+			},
 		},
 	}
+	return declaration
 }
 
 // MinimalPageExtension returns a minimal extension that contributes one page
@@ -112,7 +112,7 @@ func MinimalExtension() map[string]any {
 func MinimalPageExtension() map[string]any {
 	declaration := minimalDeclaration("kos.example.pages")
 	declaration["contributions"] = map[string]any{
-		"pages": []any{map[string]any{"id": "reports"}},
+		"pages": []any{readOnlyPage("reports", "Reports", "kos.example/v1/Report")},
 	}
 	return declaration
 }
@@ -143,7 +143,7 @@ func SystemApp() map[string]any {
 func ThirdPartyExtension() map[string]any {
 	declaration := minimalDeclaration("kos.example.notes")
 	declaration["contributions"] = map[string]any{
-		"pages": []any{map[string]any{"id": "notes"}},
+		"pages": []any{readOnlyPage("notes", "Notes", "kos.example/v1/Note")},
 		"apps":  []any{minimalApp("notes", "Notes", "https://notes.apps.kos.example/icon.svg")},
 	}
 	return declaration
@@ -151,17 +151,31 @@ func ThirdPartyExtension() map[string]any {
 
 // minimalDeclaration returns a valid declaration skeleton; callers set the
 // contributions of their case and leave every other block empty.
-func minimalDeclaration(id string) map[string]any {
+func minimalDeclaration(identifier string) map[string]any {
 	return map[string]any{
-		"id":                 id,
-		"version":            "1.0.0",
-		"frameworkVersion":   ">=1.0 <2.0",
-		"contributions":      map[string]any{},
-		"dependencies":       map[string]any{},
-		"permissions":        map[string]any{},
-		"config":             map[string]any{},
-		"status":             map[string]any{},
-		"uninstallRetention": map[string]any{},
+		"identifier":       identifier,
+		"version":          "1.0.0",
+		"frameworkVersion": ">=1.0 <2.0",
+		"contributions":    map[string]any{},
+		"dependencies":     map[string]any{},
+		"permissions":      []any{},
+		"configuration":    map[string]any{},
+		"retention":        []any{},
+	}
+}
+
+// readOnlyPage returns a page whose single item reads one object source; a
+// read-only page declares why and carries no action (KOSD-C-22, KOSD-C-53).
+func readOnlyPage(id, title, reference string) map[string]any {
+	return map[string]any{
+		"id":             id,
+		"title":          title,
+		"location":       "panel",
+		"readOnly":       true,
+		"readOnlyReason": "the source is read-only in this release",
+		"items": []any{
+			map[string]any{"id": id + "-items", "label": title, "source": "object", "reference": reference},
+		},
 	}
 }
 

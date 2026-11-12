@@ -21,23 +21,27 @@ KOS 平台项目：作者 SDK、清单结构与打包工具 — 扩展与应用�
 
 清单字段集合由框架定义，SDK 只校验与打包：不新增字段、不放宽必填项、缺项不补默认值。
 
-扩展声明（`KOSD-C-18`）的顶层字段与契约类别一一对应：
+扩展声明（`KOSD-C-18`）的字段集合取框架声明本身的字段集合，产物可直接交给内核
+`extension.Parse`：内核以封闭字段集合解析，SDK 自造的字段会让整份清单被拒。
 
 | 字段 | 契约类别 |
 |---|---|
-| `id`、`version` | 标识与版本 |
+| `identifier`、`version` | 标识与版本 |
 | `frameworkVersion` | 目标框架 API 版本范围 |
+| `apiGroup` | 扩展自己的 API 组；声明对象类时必填，对象类的 `group` 等于它（`KOSD-C-19`） |
 | `contributions` | 贡献清单 |
-| `dependencies` | 依赖：能力及其版本范围与必需保证、组件、框架版本 |
-| `permissions` | 权限：写入范围、读取范围、控制面角色、扩展对象角色写权限 |
-| `config` | 组件配置结构 |
-| `status` | 状态接口；扩展对象的 status 写者与条件集 |
-| `uninstallRetention` | 卸载保留语义与外部资源引用 |
+| `dependencies` | 依赖：能力及其版本范围、组件；框架版本在 `frameworkVersion` |
+| `permissions` | 权限：每个贡献的读取范围、控制面角色与扩展对象角色写权限 |
+| `configuration` | 组件配置结构与状态接口：`schema`、`statusWriters`、`conditions` |
+| `retention` | 卸载保留语义：每条 `resource` 的 `keep` 与 `externalReference` |
 
 `contributions` 的类别固定为十项：`objectClasses`、`controllers`、`capabilities`、`pages`、
-`settings`、`catalogSources`、`discoveryAdapters`、`diagnosticAdapters`、`userPreferences`、`apps`。
+`settings`、`catalogueSources`、`discoveryAdapters`、`diagnosticAdapters`、`preferences`、`apps`。
 `objectClasses`、`controllers`、`apps` 由本 SDK 定义声明面，其余类别的条目由作者按各自契约填写，
 SDK 只做结构检查；未声明的类别不出现在产物中。
+
+`permissions` 是逐贡献的数组；读取范围按框架的 `readScope.groups` 与 `readScope.kinds` 给出，
+kind 的 `group` 省略或留空表示核心组（如 `Event`、`Node`），不必发明占位组名。
 
 `App` 清单（`KOSD-C-73`）是独立 UI 文档声明，不是 `Page` 的变体：
 
@@ -63,10 +67,11 @@ SDK 只做结构检查；未声明的类别不出现在产物中。
 
 ## 扩展接口
 
-- `DeclareObjectClass`：扩展对象类声明。对象类属于扩展自己的 API 组，不得使用内核十类 kind
+- `DeclareObjectClass`：扩展对象类声明，字段为 `group`、`kind`、`resource`、`versions`、
+  `namespaced` 与 `references`；对象类属于扩展自己的 API 组，不得使用内核十类 kind
   （`KOSD-C-01`、`KOSD-C-19`）。
-- `DeclareController`：扩展控制器声明。写入范围按 API 组、kind 与动词给出，不得包含内核 kind；
-  动词取 `get`、`list`、`watch`、`create`、`update`、`patch`、`delete`（`KOSD-C-20`）。
+- `DeclareController`：扩展控制器声明，字段为 `id`、`manages` 与 `scope`；`manages` 列出它服务的
+  对象类，`scope` 按 API 组、下游 kind 与命名空间给出写入范围，不得包含内核 kind（`KOSD-C-20`）。
 - 两个函数在非法输入上返回 `InvalidError`，其 `Issues` 与校验结果同构。
 
 ## 客户端

@@ -1,24 +1,24 @@
 package manifest
 
 import (
-	"sort"
+	"strings"
 
 	"github.com/tsic404/kos-sdk/extension"
 	"github.com/tsic404/kos-sdk/validate"
 )
 
-// ExtensionManifestFields is the declaration's closed top-level field set; each
-// entry mirrors one category of KOSD-C-18.
+// ExtensionManifestFields is the declaration's closed top-level field set. The
+// framework fixes it (KOSD-C-18); the SDK adds no field of its own.
 var ExtensionManifestFields = []string{
-	"id",
+	"identifier",
 	"version",
 	"frameworkVersion",
+	"apiGroup",
 	"contributions",
 	"dependencies",
 	"permissions",
-	"config",
-	"status",
-	"uninstallRetention",
+	"configuration",
+	"retention",
 }
 
 // ContributionClasses are the ten contribution classes of KOSD-C-18.
@@ -28,36 +28,37 @@ var ContributionClasses = []string{
 	"capabilities",
 	"pages",
 	"settings",
-	"catalogSources",
+	"catalogueSources",
 	"discoveryAdapters",
 	"diagnosticAdapters",
-	"userPreferences",
+	"preferences",
 	"apps",
 }
 
 // DependencyFields is the dependency block's closed field set.
-var DependencyFields = []string{"capabilities", "components", "framework"}
+var DependencyFields = []string{"capabilities", "components"}
 
-// ExtensionPermissionFields is the permission block's closed field set.
-var ExtensionPermissionFields = []string{"write", "read", "roles", "objectRoles"}
+// CapabilityRequirementFields is one capability dependency's closed field set.
+var CapabilityRequirementFields = []string{"name", "versions"}
 
-// WriteScopeFields is one API write scope's closed field set (KOSD-C-18).
-var WriteScopeFields = []string{"apiGroup", "resources", "verbs"}
+// ComponentRequirementFields is one component dependency's closed field set.
+var ComponentRequirementFields = []string{"identifier", "versions"}
 
-// ReadScopeFields is one API read scope's closed field set (KOSD-C-18).
-var ReadScopeFields = []string{"apiGroup", "resources"}
+// CapabilityContributionFields is the capability contribution block's closed
+// field set.
+var CapabilityContributionFields = []string{"items", "storageClasses", "selfReported"}
 
-// StatusFields is the status declaration's closed field set.
-var StatusFields = []string{"component", "objectClasses"}
+// PermissionFields is one permission entry's closed field set.
+var PermissionFields = []string{"contribution", "readScope", "requiredRole", "objectWriters"}
 
-// ComponentStatusFields is the component status interface's closed field set.
-var ComponentStatusFields = []string{"conditions"}
+// ReadScopeFields is one read scope's closed field set.
+var ReadScopeFields = []string{"groups", "kinds"}
 
-// ObjectStatusFields is one object class status declaration's closed field set.
-var ObjectStatusFields = []string{"writer", "conditions"}
+// ConfigurationFields is the configuration block's closed field set.
+var ConfigurationFields = []string{"schema", "statusWriters", "conditions"}
 
-// RetentionFields is the uninstall retention block's closed field set.
-var RetentionFields = []string{"contributions", "externalResources"}
+// RetentionFields is one retention entry's closed field set.
+var RetentionFields = []string{"resource", "keep", "externalReference"}
 
 // KosRoles are the roles of the KOS role model; an extension object may widen
 // write access to them (KOSD-C-18).
@@ -72,106 +73,95 @@ const (
 	RoleGuest  Role = "Guest"
 )
 
-// RetentionAction is what uninstall does with a contribution's data.
-type RetentionAction string
-
-const (
-	Retain RetentionAction = "retain"
-	Delete RetentionAction = "delete"
-)
-
 // Contributions carries the ten contribution classes. A class the author did
 // not declare is absent from the produced manifest.
 type Contributions struct {
 	ObjectClasses      []extension.ObjectClassDeclaration `json:"objectClasses,omitempty"`
 	Controllers        []extension.ControllerDeclaration  `json:"controllers,omitempty"`
-	Capabilities       []map[string]any                   `json:"capabilities,omitempty"`
+	Capabilities       *CapabilityContributions           `json:"capabilities,omitempty"`
 	Pages              []map[string]any                   `json:"pages,omitempty"`
 	Settings           []map[string]any                   `json:"settings,omitempty"`
-	CatalogSources     []map[string]any                   `json:"catalogSources,omitempty"`
+	CatalogueSources   []map[string]any                   `json:"catalogueSources,omitempty"`
 	DiscoveryAdapters  []map[string]any                   `json:"discoveryAdapters,omitempty"`
 	DiagnosticAdapters []map[string]any                   `json:"diagnosticAdapters,omitempty"`
-	UserPreferences    map[string]any                     `json:"userPreferences,omitempty"`
+	Preferences        []map[string]any                   `json:"preferences,omitempty"`
 	Apps               []AppManifest                      `json:"apps,omitempty"`
 }
 
-// CapabilityDependency is a capability requirement with its version range and
-// required guarantees.
-type CapabilityDependency struct {
-	Name       string         `json:"name"`
-	Version    string         `json:"version,omitempty"`
-	Guarantees map[string]any `json:"guarantees,omitempty"`
-	Optional   bool           `json:"optional,omitempty"`
+// CapabilityContributions is the capability contribution class: the capability
+// entries, the storage classes the provider supplies and its own conformance
+// report (KOSD-C-18, KOSD-C-47).
+type CapabilityContributions struct {
+	Items          []map[string]any `json:"items,omitempty"`
+	StorageClasses []string         `json:"storageClasses,omitempty"`
+	SelfReported   []map[string]any `json:"selfReported,omitempty"`
 }
 
-// ComponentDependency requires another installed component.
-type ComponentDependency struct {
-	ID      string `json:"id"`
-	Version string `json:"version,omitempty"`
-}
-
-// Dependencies is the dependency block of the declaration.
+// Dependencies are the capability, component and framework edges of the
+// declaration (KOSD-C-18).
 type Dependencies struct {
-	Capabilities []CapabilityDependency `json:"capabilities,omitempty"`
-	Components   []ComponentDependency  `json:"components,omitempty"`
-	Framework    string                 `json:"framework,omitempty"`
+	Capabilities []CapabilityRequirement `json:"capabilities,omitempty"`
+	Components   []ComponentRequirement  `json:"components,omitempty"`
 }
 
-// WriteScope grants writes on an API group's resources with a verb set.
-type WriteScope struct {
-	APIGroup  string   `json:"apiGroup"`
-	Resources []string `json:"resources"`
-	Verbs     []string `json:"verbs"`
+// CapabilityRequirement is one capability edge; an empty Versions admits every
+// version.
+type CapabilityRequirement struct {
+	Name     string `json:"name"`
+	Versions string `json:"versions,omitempty"`
 }
 
-// ReadScope grants reads on an API group's resources.
+// ComponentRequirement requires another installed component.
+type ComponentRequirement struct {
+	Identifier string `json:"identifier"`
+	Versions   string `json:"versions,omitempty"`
+}
+
+// Permission is one declared permission: the contribution it belongs to, what
+// that contribution reads, the control-plane role it needs and the roles that
+// may write the extension's objects (KOSD-C-18).
+type ExtensionPermission struct {
+	Contribution  string    `json:"contribution"`
+	ReadScope     ReadScope `json:"readScope,omitempty"`
+	RequiredRole  string    `json:"requiredRole,omitempty"`
+	ObjectWriters []Role    `json:"objectWriters,omitempty"`
+}
+
+// ReadScope is the read side of a declared permission: API groups and kinds.
+// An empty group is the core group, so reading Event or Node needs no invented
+// group name.
 type ReadScope struct {
-	APIGroup  string   `json:"apiGroup"`
-	Resources []string `json:"resources"`
+	Groups []string              `json:"groups,omitempty"`
+	Kinds  []extension.GroupKind `json:"kinds,omitempty"`
 }
 
-// ExtensionPermissions is the permission block of the declaration.
-type ExtensionPermissions struct {
-	Write       []WriteScope      `json:"write,omitempty"`
-	Read        []ReadScope       `json:"read,omitempty"`
-	Roles       []string          `json:"roles,omitempty"`
-	ObjectRoles map[string][]Role `json:"objectRoles,omitempty"`
+// Configuration is the declared component configuration structure and the
+// status interface its objects expose (KOSD-C-18).
+type Configuration struct {
+	Schema        map[string]any `json:"schema,omitempty"`
+	StatusWriters []Role         `json:"statusWriters,omitempty"`
+	Conditions    []string       `json:"conditions,omitempty"`
 }
 
-// ComponentStatus is the component status interface.
-type ComponentStatus struct {
-	Conditions []string `json:"conditions,omitempty"`
-}
-
-// ObjectStatus names the writer and condition set of one extension object class.
-type ObjectStatus struct {
-	Writer     string   `json:"writer"`
-	Conditions []string `json:"conditions"`
-}
-
-// StatusDeclaration is the status block of the declaration.
-type StatusDeclaration struct {
-	Component     *ComponentStatus        `json:"component,omitempty"`
-	ObjectClasses map[string]ObjectStatus `json:"objectClasses,omitempty"`
-}
-
-// UninstallRetention fixes what uninstall keeps or removes for each contribution.
-type UninstallRetention struct {
-	Contributions     map[string]RetentionAction `json:"contributions,omitempty"`
-	ExternalResources []string                   `json:"externalResources,omitempty"`
+// Retention is the declared fate of one contribution's data when its component
+// is uninstalled (KOSD-C-18, KOSD-C-29).
+type Retention struct {
+	Resource          string `json:"resource"`
+	Keep              bool   `json:"keep"`
+	ExternalReference string `json:"externalReference,omitempty"`
 }
 
 // ExtensionManifest is the extension declaration of KOSD-C-18.
 type ExtensionManifest struct {
-	ID                 string               `json:"id"`
-	Version            string               `json:"version"`
-	FrameworkVersion   string               `json:"frameworkVersion"`
-	Contributions      Contributions        `json:"contributions"`
-	Dependencies       Dependencies         `json:"dependencies"`
-	Permissions        ExtensionPermissions `json:"permissions"`
-	Config             map[string]any       `json:"config"`
-	Status             StatusDeclaration    `json:"status"`
-	UninstallRetention UninstallRetention   `json:"uninstallRetention"`
+	Identifier       string                `json:"identifier"`
+	Version          string                `json:"version"`
+	FrameworkVersion string                `json:"frameworkVersion"`
+	APIGroup         string                `json:"apiGroup,omitempty"`
+	Contributions    Contributions         `json:"contributions"`
+	Dependencies     Dependencies          `json:"dependencies"`
+	Permissions      []ExtensionPermission `json:"permissions"`
+	Configuration    Configuration         `json:"configuration"`
+	Retention        []Retention           `json:"retention"`
 }
 
 // ValidateExtensionManifest checks an extension declaration and returns it unchanged.
@@ -192,16 +182,52 @@ func checkExtension(c *validate.Checker, value any, path string) ExtensionManife
 	c.RejectUnknown(record, ExtensionManifestFields, path)
 
 	manifest := ExtensionManifest{}
-	manifest.ID, _ = c.RequireString(record, "id", path)
+	manifest.Identifier, _ = c.RequireString(record, "identifier", path)
 	manifest.Version, _ = c.RequireString(record, "version", path)
 	manifest.FrameworkVersion, _ = c.RequireString(record, "frameworkVersion", path)
+	manifest.APIGroup = checkAPIGroup(c, record, path)
 	manifest.Contributions = checkContributionsField(c, record, path)
 	manifest.Dependencies = checkDependenciesField(c, record, path)
-	manifest.Permissions = checkExtensionPermissionsField(c, record, path)
-	manifest.Config, _ = c.RequireRecord(record, "config", path)
-	manifest.Status = checkStatusField(c, record, path)
-	manifest.UninstallRetention = checkRetentionField(c, record, path)
+	manifest.Permissions = checkPermissionsField(c, record, path)
+	manifest.Configuration = checkConfigurationField(c, record, path)
+	manifest.Retention = checkRetentionField(c, record, path)
+	checkClassGroups(c, manifest, path)
 	return manifest
+}
+
+// checkAPIGroup reads the extension's own API group. Object classes belong to
+// it, so it stays optional only for declarations that contribute none (C-19).
+func checkAPIGroup(c *validate.Checker, record map[string]any, path string) string {
+	raw, present := c.Optional(record, "apiGroup")
+	if !present {
+		return ""
+	}
+	apiGroup, ok := raw.(string)
+	if !ok || strings.TrimSpace(apiGroup) != apiGroup {
+		c.Add(validate.Join(path, "apiGroup"), validate.CodeInvalidType,
+			"expected a string with no surrounding whitespace")
+		return ""
+	}
+	return apiGroup
+}
+
+// checkClassGroups holds every declared class to the declaration's own API
+// group; the kernel refuses a class outside it (KOSD-C-19).
+func checkClassGroups(c *validate.Checker, manifest ExtensionManifest, path string) {
+	classesPath := validate.Join(validate.Join(path, "contributions"), "objectClasses")
+	for index, class := range manifest.Contributions.ObjectClasses {
+		entryPath := validate.Join(validate.Index(classesPath, index), "group")
+		switch {
+		case class.Group == "":
+			continue
+		case manifest.APIGroup == "":
+			c.Add(entryPath, validate.CodeMissingField,
+				"an object class needs the declaration's apiGroup (KOSD-C-19)")
+		case class.Group != manifest.APIGroup:
+			c.Add(entryPath, validate.CodeInvalidValue,
+				"group %q must equal the declaration's apiGroup %q (KOSD-C-19)", class.Group, manifest.APIGroup)
+		}
+	}
 }
 
 func checkContributionsField(c *validate.Checker, record map[string]any, path string) Contributions {
@@ -219,25 +245,71 @@ func checkContributionsField(c *validate.Checker, record map[string]any, path st
 	contributions := Contributions{}
 	contributions.ObjectClasses = checkList(c, declared, "objectClasses", contributionsPath, extension.CheckObjectClass)
 	contributions.Controllers = checkList(c, declared, "controllers", contributionsPath, extension.CheckController)
+	contributions.Capabilities = checkCapabilities(c, declared, contributionsPath)
+	contributions.Pages = checkPayloadList(c, declared, "pages", contributionsPath)
+	contributions.Settings = checkPayloadList(c, declared, "settings", contributionsPath)
+	contributions.CatalogueSources = checkPayloadList(c, declared, "catalogueSources", contributionsPath)
+	contributions.DiscoveryAdapters = checkPayloadList(c, declared, "discoveryAdapters", contributionsPath)
+	contributions.DiagnosticAdapters = checkPayloadList(c, declared, "diagnosticAdapters", contributionsPath)
+	contributions.Preferences = checkPayloadList(c, declared, "preferences", contributionsPath)
 	contributions.Apps = checkList(c, declared, "apps", contributionsPath, checkApp)
-	contributions.Capabilities = checkList(c, declared, "capabilities", contributionsPath, checkPayload)
-	contributions.Pages = checkList(c, declared, "pages", contributionsPath, checkPayload)
-	contributions.Settings = checkList(c, declared, "settings", contributionsPath, checkPayload)
-	contributions.CatalogSources = checkList(c, declared, "catalogSources", contributionsPath, checkPayload)
-	contributions.DiscoveryAdapters = checkList(c, declared, "discoveryAdapters", contributionsPath, checkPayload)
-	contributions.DiagnosticAdapters = checkList(c, declared, "diagnosticAdapters", contributionsPath, checkPayload)
-	contributions.UserPreferences, _ = c.OptionalRecord(declared, "userPreferences", contributionsPath)
 	return contributions
 }
 
-// checkPayload accepts an author payload of a contribution class whose fields
-// belong to its own contract, not to this manifest.
-func checkPayload(c *validate.Checker, value any, path string) map[string]any {
-	payload, ok := c.Record(value, path)
+func checkCapabilities(c *validate.Checker, record map[string]any, path string) *CapabilityContributions {
+	value, ok := c.Optional(record, "capabilities")
 	if !ok {
 		return nil
 	}
-	return payload
+	capabilitiesPath := validate.Join(path, "capabilities")
+	declared, ok := c.Record(value, capabilitiesPath)
+	if !ok {
+		return nil
+	}
+	c.RejectUnknown(declared, CapabilityContributionFields, capabilitiesPath)
+
+	capabilities := &CapabilityContributions{}
+	capabilities.Items = payloadEntries(c, declared, "items", capabilitiesPath)
+	capabilities.StorageClasses, _ = c.OptionalStringArray(declared, "storageClasses", capabilitiesPath)
+	capabilities.SelfReported = payloadEntries(c, declared, "selfReported", capabilitiesPath)
+	return capabilities
+}
+
+// checkPayloadList accepts a contribution class whose entries belong to their
+// own contract, not to this manifest; each entry stays an object.
+func checkPayloadList(c *validate.Checker, record map[string]any, key, path string) []map[string]any {
+	items, ok := c.OptionalArray(record, key, path)
+	if !ok {
+		return nil
+	}
+	listPath := validate.Join(path, key)
+	payloads := make([]map[string]any, 0, len(items))
+	for index, item := range items {
+		payload, ok := c.Record(item, validate.Index(listPath, index))
+		if !ok {
+			continue
+		}
+		payloads = append(payloads, payload)
+	}
+	return payloads
+}
+
+// payloadEntries reads an object field whose entries are author payloads.
+func payloadEntries(c *validate.Checker, record map[string]any, key, path string) []map[string]any {
+	items, ok := c.OptionalArray(record, key, path)
+	if !ok {
+		return nil
+	}
+	listPath := validate.Join(path, key)
+	payloads := make([]map[string]any, 0, len(items))
+	for index, item := range items {
+		payload, ok := c.Record(item, validate.Index(listPath, index))
+		if !ok {
+			continue
+		}
+		payloads = append(payloads, payload)
+	}
+	return payloads
 }
 
 func checkList[T any](
@@ -272,256 +344,194 @@ func checkDependenciesField(c *validate.Checker, record map[string]any, path str
 	c.RejectUnknown(declared, DependencyFields, dependenciesPath)
 
 	dependencies := Dependencies{}
-	dependencies.Capabilities = checkList(c, declared, "capabilities", dependenciesPath, checkCapabilityDependency)
-	dependencies.Components = checkList(c, declared, "components", dependenciesPath, checkComponentDependency)
-	dependencies.Framework, _ = c.OptionalString(declared, "framework", dependenciesPath)
+	dependencies.Capabilities = checkList(c, declared, "capabilities", dependenciesPath, checkCapabilityRequirement)
+	dependencies.Components = checkList(c, declared, "components", dependenciesPath, checkComponentRequirement)
 	return dependencies
 }
 
-func checkCapabilityDependency(c *validate.Checker, value any, path string) CapabilityDependency {
+func checkCapabilityRequirement(c *validate.Checker, value any, path string) CapabilityRequirement {
 	declared, ok := c.Record(value, path)
 	if !ok {
-		return CapabilityDependency{}
+		return CapabilityRequirement{}
 	}
-	dependency := CapabilityDependency{}
-	dependency.Name, _ = c.RequireString(declared, "name", path)
-	dependency.Version, _ = c.OptionalString(declared, "version", path)
-	dependency.Guarantees = checkGuarantees(c, declared, path)
-	if optional, ok := c.Optional(declared, "optional"); ok {
-		dependency.Optional, _ = c.Boolean(optional, validate.Join(path, "optional"))
-	}
-	return dependency
+	c.RejectUnknown(declared, CapabilityRequirementFields, path)
+
+	requirement := CapabilityRequirement{}
+	requirement.Name, _ = c.RequireString(declared, "name", path)
+	requirement.Versions, _ = c.OptionalString(declared, "versions", path)
+	return requirement
 }
 
-// KOSD-C-09 fixes a guarantee level as a boolean or an enumeration value.
-func checkGuarantees(c *validate.Checker, record map[string]any, path string) map[string]any {
-	declared, ok := c.OptionalRecord(record, "guarantees", path)
+func checkComponentRequirement(c *validate.Checker, value any, path string) ComponentRequirement {
+	declared, ok := c.Record(value, path)
+	if !ok {
+		return ComponentRequirement{}
+	}
+	c.RejectUnknown(declared, ComponentRequirementFields, path)
+
+	requirement := ComponentRequirement{}
+	requirement.Identifier, _ = c.RequireString(declared, "identifier", path)
+	requirement.Versions, _ = c.OptionalString(declared, "versions", path)
+	return requirement
+}
+
+func checkPermissionsField(c *validate.Checker, record map[string]any, path string) []ExtensionPermission {
+	value, ok := c.Field(record, "permissions", path)
 	if !ok {
 		return nil
 	}
-	guaranteesPath := validate.Join(path, "guarantees")
-	for _, key := range sortedKeys(declared) {
-		switch declared[key].(type) {
-		case bool, string:
-		default:
-			c.Add(validate.Join(guaranteesPath, key), validate.CodeInvalidType,
-				"a guarantee level is a boolean or an enumeration value (KOSD-C-09)")
-		}
-	}
-	return declared
-}
-
-func checkComponentDependency(c *validate.Checker, value any, path string) ComponentDependency {
-	declared, ok := c.Record(value, path)
-	if !ok {
-		return ComponentDependency{}
-	}
-	dependency := ComponentDependency{}
-	dependency.ID, _ = c.RequireString(declared, "id", path)
-	dependency.Version, _ = c.OptionalString(declared, "version", path)
-	return dependency
-}
-
-func checkExtensionPermissionsField(c *validate.Checker, record map[string]any, path string) ExtensionPermissions {
-	value, ok := c.Field(record, "permissions", path)
-	if !ok {
-		return ExtensionPermissions{}
-	}
 	permissionsPath := validate.Join(path, "permissions")
-	declared, ok := c.Record(value, permissionsPath)
+	items, ok := c.Array(value, permissionsPath)
 	if !ok {
-		return ExtensionPermissions{}
+		return nil
 	}
-	c.RejectUnknown(declared, ExtensionPermissionFields, permissionsPath)
-
-	permissions := ExtensionPermissions{}
-	permissions.Write = checkList(c, declared, "write", permissionsPath, checkAPIScope)
-	permissions.Read = checkList(c, declared, "read", permissionsPath, checkReadScope)
-	permissions.Roles, _ = c.OptionalStringArray(declared, "roles", permissionsPath)
-	permissions.ObjectRoles = checkObjectRoles(c, declared, permissionsPath)
+	permissions := make([]ExtensionPermission, 0, len(items))
+	for index, item := range items {
+		permissions = append(permissions, checkPermission(c, item, validate.Index(permissionsPath, index)))
+	}
 	return permissions
 }
 
-func checkAPIScope(c *validate.Checker, value any, path string) WriteScope {
+func checkPermission(c *validate.Checker, value any, path string) ExtensionPermission {
 	declared, ok := c.Record(value, path)
 	if !ok {
-		return WriteScope{}
+		return ExtensionPermission{}
 	}
-	c.RejectUnknown(declared, WriteScopeFields, path)
+	c.RejectUnknown(declared, PermissionFields, path)
 
-	scope := WriteScope{}
-	scope.APIGroup, _ = c.RequireString(declared, "apiGroup", path)
-	scope.Resources, _ = c.RequireStringArray(declared, "resources", path)
-	scope.Verbs = checkAPIVerbs(c, declared, path)
-	return scope
+	permission := ExtensionPermission{}
+	permission.Contribution, _ = c.RequireString(declared, "contribution", path)
+	permission.ReadScope = checkReadScope(c, declared, path)
+	permission.RequiredRole = checkOptionalRole(c, declared, "requiredRole", path)
+	permission.ObjectWriters = checkOptionalRoles(c, declared, "objectWriters", path)
+	return permission
 }
 
-func checkReadScope(c *validate.Checker, value any, path string) ReadScope {
-	declared, ok := c.Record(value, path)
+// checkReadScope accepts the kernel's scope shape: groups and kinds, each with
+// an optional group whose empty value names the core group.
+func checkReadScope(c *validate.Checker, record map[string]any, path string) ReadScope {
+	value, ok := c.Optional(record, "readScope")
 	if !ok {
 		return ReadScope{}
 	}
-	c.RejectUnknown(declared, ReadScopeFields, path)
+	scopePath := validate.Join(path, "readScope")
+	declared, ok := c.Record(value, scopePath)
+	if !ok {
+		return ReadScope{}
+	}
+	c.RejectUnknown(declared, ReadScopeFields, scopePath)
 
 	scope := ReadScope{}
-	scope.APIGroup, _ = c.RequireString(declared, "apiGroup", path)
-	scope.Resources, _ = c.RequireStringArray(declared, "resources", path)
+	scope.Groups = checkGroupList(c, declared, "groups", scopePath)
+	if items, ok := c.OptionalArray(declared, "kinds", scopePath); ok {
+		kindsPath := validate.Join(scopePath, "kinds")
+		scope.Kinds = make([]extension.GroupKind, 0, len(items))
+		for index, item := range items {
+			scope.Kinds = append(scope.Kinds, extension.CheckGroupKind(c, item, validate.Index(kindsPath, index)))
+		}
+	}
 	return scope
 }
 
-func checkAPIVerbs(c *validate.Checker, record map[string]any, path string) []string {
-	verbs, ok := c.RequireStringArray(record, "verbs", path)
+// checkGroupList reads API groups that may name the core group as the empty
+// string.
+func checkGroupList(c *validate.Checker, record map[string]any, key, path string) []string {
+	items, ok := c.OptionalArray(record, key, path)
 	if !ok {
 		return nil
 	}
-	verbsPath := validate.Join(path, "verbs")
-	accepted := make([]string, 0, len(verbs))
-	for index, verb := range verbs {
-		if !isWriteVerb(verb) {
-			c.Add(validate.Index(verbsPath, index), validate.CodeInvalidValue,
-				"unknown verb %q; expected one of %v", verb, extension.WriteVerbs)
-			continue
-		}
-		accepted = append(accepted, verb)
-	}
-	return accepted
-}
-
-func checkObjectRoles(c *validate.Checker, record map[string]any, path string) map[string][]Role {
-	declared, ok := c.OptionalRecord(record, "objectRoles", path)
-	if !ok {
-		return nil
-	}
-	rolesPath := validate.Join(path, "objectRoles")
-	objectRoles := make(map[string][]Role, len(declared))
-	for _, kind := range sortedKeys(declared) {
-		entryPath := validate.Join(rolesPath, kind)
-		names, ok := c.StringArray(declared[kind], entryPath)
+	listPath := validate.Join(path, key)
+	groups := make([]string, 0, len(items))
+	for index, item := range items {
+		group, ok := item.(string)
 		if !ok {
+			c.Add(validate.Index(listPath, index), validate.CodeInvalidType, "expected a string")
 			continue
 		}
-		roles := make([]Role, 0, len(names))
-		for _, name := range names {
-			if !isKosRole(name) {
-				c.Add(entryPath, validate.CodeInvalidValue,
-					"unknown role %q; expected one of %v", name, KosRoles)
-				continue
-			}
-			roles = append(roles, Role(name))
-		}
-		objectRoles[kind] = roles
+		groups = append(groups, group)
 	}
-	return objectRoles
+	return groups
 }
 
-func checkStatusField(c *validate.Checker, record map[string]any, path string) StatusDeclaration {
-	value, ok := c.Field(record, "status", path)
+func checkOptionalRole(c *validate.Checker, record map[string]any, key, path string) string {
+	role, ok := c.OptionalString(record, key, path)
 	if !ok {
-		return StatusDeclaration{}
+		return ""
 	}
-	statusPath := validate.Join(path, "status")
-	declared, ok := c.Record(value, statusPath)
-	if !ok {
-		return StatusDeclaration{}
+	if !isKosRole(role) {
+		c.Add(validate.Join(path, key), validate.CodeInvalidValue,
+			"unknown role %q; expected one of %v", role, KosRoles)
+		return ""
 	}
-	c.RejectUnknown(declared, StatusFields, statusPath)
-
-	status := StatusDeclaration{}
-	status.Component = checkComponentStatus(c, declared, statusPath)
-	status.ObjectClasses = checkObjectStatuses(c, declared, statusPath)
-	return status
+	return role
 }
 
-func checkComponentStatus(c *validate.Checker, record map[string]any, path string) *ComponentStatus {
-	value, ok := c.Optional(record, "component")
+func checkOptionalRoles(c *validate.Checker, record map[string]any, key, path string) []Role {
+	names, ok := c.OptionalStringArray(record, key, path)
 	if !ok {
 		return nil
 	}
-	componentPath := validate.Join(path, "component")
-	declared, ok := c.Record(value, componentPath)
-	if !ok {
-		return nil
-	}
-	c.RejectUnknown(declared, ComponentStatusFields, componentPath)
-	component := &ComponentStatus{}
-	component.Conditions, _ = c.OptionalStringArray(declared, "conditions", componentPath)
-	return component
-}
-
-func checkObjectStatuses(c *validate.Checker, record map[string]any, path string) map[string]ObjectStatus {
-	value, ok := c.Optional(record, "objectClasses")
-	if !ok {
-		return nil
-	}
-	classesPath := validate.Join(path, "objectClasses")
-	declared, ok := c.Record(value, classesPath)
-	if !ok {
-		return nil
-	}
-	statuses := make(map[string]ObjectStatus, len(declared))
-	for _, kind := range sortedKeys(declared) {
-		entryPath := validate.Join(classesPath, kind)
-		entry, ok := c.Record(declared[kind], entryPath)
-		if !ok {
+	rolesPath := validate.Join(path, key)
+	roles := make([]Role, 0, len(names))
+	for index, name := range names {
+		if !isKosRole(name) {
+			c.Add(validate.Index(rolesPath, index), validate.CodeInvalidValue,
+				"unknown role %q; expected one of %v", name, KosRoles)
 			continue
 		}
-		c.RejectUnknown(entry, ObjectStatusFields, entryPath)
-		status := ObjectStatus{}
-		status.Writer, _ = c.RequireString(entry, "writer", entryPath)
-		status.Conditions, _ = c.RequireStringArray(entry, "conditions", entryPath)
-		statuses[kind] = status
+		roles = append(roles, Role(name))
 	}
-	return statuses
+	return roles
 }
 
-func checkRetentionField(c *validate.Checker, record map[string]any, path string) UninstallRetention {
-	value, ok := c.Field(record, "uninstallRetention", path)
+func checkConfigurationField(c *validate.Checker, record map[string]any, path string) Configuration {
+	value, ok := c.Field(record, "configuration", path)
 	if !ok {
-		return UninstallRetention{}
+		return Configuration{}
 	}
-	retentionPath := validate.Join(path, "uninstallRetention")
-	declared, ok := c.Record(value, retentionPath)
+	configurationPath := validate.Join(path, "configuration")
+	declared, ok := c.Record(value, configurationPath)
 	if !ok {
-		return UninstallRetention{}
+		return Configuration{}
 	}
-	c.RejectUnknown(declared, RetentionFields, retentionPath)
+	c.RejectUnknown(declared, ConfigurationFields, configurationPath)
 
-	retention := UninstallRetention{}
-	retention.Contributions = checkRetentionActions(c, declared, retentionPath)
-	retention.ExternalResources, _ = c.OptionalStringArray(declared, "externalResources", retentionPath)
+	configuration := Configuration{}
+	configuration.Schema, _ = c.OptionalRecord(declared, "schema", configurationPath)
+	configuration.StatusWriters = checkOptionalRoles(c, declared, "statusWriters", configurationPath)
+	configuration.Conditions, _ = c.OptionalStringArray(declared, "conditions", configurationPath)
+	return configuration
+}
+
+func checkRetentionField(c *validate.Checker, record map[string]any, path string) []Retention {
+	value, ok := c.Field(record, "retention", path)
+	if !ok {
+		return nil
+	}
+	retentionPath := validate.Join(path, "retention")
+	items, ok := c.Array(value, retentionPath)
+	if !ok {
+		return nil
+	}
+	retention := make([]Retention, 0, len(items))
+	for index, item := range items {
+		retention = append(retention, checkRetention(c, item, validate.Index(retentionPath, index)))
+	}
 	return retention
 }
 
-func checkRetentionActions(c *validate.Checker, record map[string]any, path string) map[string]RetentionAction {
-	value, ok := c.Optional(record, "contributions")
+func checkRetention(c *validate.Checker, value any, path string) Retention {
+	declared, ok := c.Record(value, path)
 	if !ok {
-		return nil
+		return Retention{}
 	}
-	contributionsPath := validate.Join(path, "contributions")
-	declared, ok := c.Record(value, contributionsPath)
-	if !ok {
-		return nil
-	}
-	actions := make(map[string]RetentionAction, len(declared))
-	for _, key := range sortedKeys(declared) {
-		action, ok := declared[key].(string)
-		if !ok || (RetentionAction(action) != Retain && RetentionAction(action) != Delete) {
-			c.Add(validate.Join(contributionsPath, key), validate.CodeInvalidValue,
-				"retention is either %q or %q (KOSD-C-18)", Retain, Delete)
-			continue
-		}
-		actions[key] = RetentionAction(action)
-	}
-	return actions
-}
+	c.RejectUnknown(declared, RetentionFields, path)
 
-func isWriteVerb(verb string) bool {
-	for _, allowed := range extension.WriteVerbs {
-		if allowed == verb {
-			return true
-		}
-	}
-	return false
+	entry := Retention{}
+	entry.Resource, _ = c.RequireString(declared, "resource", path)
+	entry.Keep, _ = c.RequireBoolean(declared, "keep", path)
+	entry.ExternalReference, _ = c.OptionalString(declared, "externalReference", path)
+	return entry
 }
 
 func isKosRole(role string) bool {
@@ -531,13 +541,4 @@ func isKosRole(role string) bool {
 		}
 	}
 	return false
-}
-
-func sortedKeys(record map[string]any) []string {
-	keys := make([]string, 0, len(record))
-	for key := range record {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

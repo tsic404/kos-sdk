@@ -1,6 +1,7 @@
 // Package sdktc4 verifies that every required manifest field and every window
 // field is rejected when absent, that a permission name outside the fixed set
-// is rejected, and that valid manifests pass (SDK-AC-4, SDK-TC-4, P0).
+// is rejected, that a core-group read scope is accepted, and that valid
+// manifests pass (SDK-AC-4, SDK-TC-4, P0).
 package sdktc4
 
 import (
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tsic404/kos-sdk/manifest"
+	"github.com/tsic404/kos-sdk/packaging"
 	"github.com/tsic404/kos-sdk/tests/acceptance/fixtures"
 	"github.com/tsic404/kos-sdk/validate"
 )
@@ -42,6 +44,13 @@ func withoutKey(key string) any {
 	return extension
 }
 
+func withoutPermissionKey(key string) any {
+	extension := fixtures.MinimalExtension()
+	permissions := extension["permissions"].([]any)
+	delete(permissions[0].(map[string]any), key)
+	return extension
+}
+
 func withoutAppKey(key string) any {
 	app := fixtures.MinimalApp()
 	delete(app, key)
@@ -54,19 +63,19 @@ func withoutWindowKey(key string) any {
 	return app
 }
 
-// missingFieldCases covers all 23 required sites: 9 extension fields, 7 App
-// fields and 7 window fields (KOSD-C-18, KOSD-C-73).
+// missingFieldCases covers all 23 required sites: 8 extension fields, one
+// permission entry, 7 App fields and 7 window fields (KOSD-C-18, KOSD-C-73).
 func missingFieldCases() []missingFieldCase {
 	return []missingFieldCase{
-		{"extension id", targetExtension, "$.id", func() any { return withoutKey("id") }},
+		{"extension identifier", targetExtension, "$.identifier", func() any { return withoutKey("identifier") }},
 		{"extension version", targetExtension, "$.version", func() any { return withoutKey("version") }},
 		{"extension frameworkVersion", targetExtension, "$.frameworkVersion", func() any { return withoutKey("frameworkVersion") }},
 		{"extension contributions", targetExtension, "$.contributions", func() any { return withoutKey("contributions") }},
 		{"extension dependencies", targetExtension, "$.dependencies", func() any { return withoutKey("dependencies") }},
 		{"extension permissions", targetExtension, "$.permissions", func() any { return withoutKey("permissions") }},
-		{"extension config", targetExtension, "$.config", func() any { return withoutKey("config") }},
-		{"extension status", targetExtension, "$.status", func() any { return withoutKey("status") }},
-		{"extension uninstallRetention", targetExtension, "$.uninstallRetention", func() any { return withoutKey("uninstallRetention") }},
+		{"extension configuration", targetExtension, "$.configuration", func() any { return withoutKey("configuration") }},
+		{"extension retention", targetExtension, "$.retention", func() any { return withoutKey("retention") }},
+		{"extension permission contribution", targetExtension, "$.permissions[0].contribution", func() any { return withoutPermissionKey("contribution") }},
 		{"app id", targetApp, "$.id", func() any { return withoutAppKey("id") }},
 		{"app name", targetApp, "$.name", func() any { return withoutAppKey("name") }},
 		{"app version", targetApp, "$.version", func() any { return withoutAppKey("version") }},
@@ -145,16 +154,83 @@ func TestEmbeddedAppWithUndeclaredPermissionIsRejected(t *testing.T) {
 	}
 }
 
+// TestCoreGroupReadScopeIsAccepted keeps the kernel's naming: a read scope that
+// names a core-group kind leaves group empty instead of inventing a group.
+func TestCoreGroupReadScopeIsAccepted(t *testing.T) {
+	built, archive, err := packaging.Pack(fixtures.CoreGroupReadExtension(), nil)
+	if err != nil {
+		t.Fatalf("pack a manifest reading a core-group kind: %v", err)
+	}
+	if built.Manifest.Permissions[0].ReadScope.Kinds[0].Group != "" {
+		t.Fatalf("core-group read scope invented the group %q", built.Manifest.Permissions[0].ReadScope.Kinds[0].Group)
+	}
+
+	entries, err := fixtures.ReadArchive(archive)
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	manifestEntry, ok := fixtures.Find(entries, packaging.ManifestEntry)
+	if !ok {
+		t.Fatal("archive carries no manifest")
+	}
+	produced, err := decodeManifest(manifestEntry.Content)
+	if err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+
+	permissions, ok := produced["permissions"].([]any)
+	if !ok || len(permissions) != 1 {
+		t.Fatalf("permissions = %v, want one entry", produced["permissions"])
+	}
+	readScope, ok := permissions[0].(map[string]any)["readScope"].(map[string]any)
+	if !ok {
+		t.Fatalf("permission carries no read scope: %v", permissions[0])
+	}
+	for _, key := range sortedKeys(readScope) {
+		if key != "groups" && key != "kinds" {
+			t.Fatalf("read scope carries the field %q outside the framework's set", key)
+		}
+	}
+	kinds, ok := readScope["kinds"].([]any)
+	if !ok || len(kinds) != 1 {
+		t.Fatalf("read scope kinds = %v, want one entry", readScope["kinds"])
+	}
+	kind, ok := kinds[0].(map[string]any)
+	if !ok {
+		t.Fatalf("read scope kind is not an object: %T", kinds[0])
+	}
+	if _, present := kind["group"]; present {
+		t.Fatalf("core-group kind carries a group: %v", kind)
+	}
+	if kind["kind"] != "Event" {
+		t.Fatalf("read scope kind = %v, want Event", kind["kind"])
+	}
+}
+
+func sortedKeys(record map[string]any) []string {
+	keys := make([]string, 0, len(record))
+	for key := range record {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func decodeManifest(content []byte) (map[string]any, error) {
+	var produced map[string]any
+	err := json.Unmarshal(content, &produced)
+	return produced, err
+}
+
 func TestValidManifestsPass(t *testing.T) {
 	extension := manifest.ValidateExtensionManifest(fixtures.MinimalExtension())
 	if !extension.OK() {
 		t.Fatalf("valid extension rejected: %v", extension.Issues)
 	}
-	if extension.Manifest.ID != "kos.example.files" {
-		t.Fatalf("unexpected extension id %q", extension.Manifest.ID)
+	if extension.Manifest.Identifier != "kos.example.files" {
+		t.Fatalf("unexpected extension identifier %q", extension.Manifest.Identifier)
 	}
-	if len(extension.Manifest.Contributions.Apps) != 1 {
-		t.Fatalf("expected one embedded App, got %d", len(extension.Manifest.Contributions.Apps))
+	if len(extension.Manifest.Contributions.ObjectClasses) != 1 {
+		t.Fatalf("expected one object class, got %d", len(extension.Manifest.Contributions.ObjectClasses))
 	}
 
 	app := manifest.ValidateAppManifest(fixtures.MinimalApp())
