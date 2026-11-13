@@ -31,7 +31,7 @@ func hasIssue(issues []validate.Issue, path string, code validate.Code) bool {
 
 func TestPackRejectsInvalidDeclaration(t *testing.T) {
 	declaration := fixtures.MinimalPageExtension()
-	delete(declaration, "id")
+	delete(declaration, "identifier")
 
 	pkg, archive, err := packaging.Pack(declaration, nil)
 	var invalid *validate.InvalidError
@@ -41,8 +41,8 @@ func TestPackRejectsInvalidDeclaration(t *testing.T) {
 	if archive != nil || pkg.Digest != "" {
 		t.Fatal("a rejected declaration produced an artifact")
 	}
-	if !hasIssue(invalid.Issues, "$.id", validate.CodeMissingField) {
-		t.Fatalf("expected a missing-field issue for $.id, got %v", invalid.Issues)
+	if !hasIssue(invalid.Issues, "$.identifier", validate.CodeMissingField) {
+		t.Fatalf("expected a missing-field issue for $.identifier, got %v", invalid.Issues)
 	}
 }
 
@@ -166,7 +166,7 @@ func TestVerifyAcceptsTheBuiltPackage(t *testing.T) {
 	if loaded.Digest != built.Digest {
 		t.Fatalf("digest = %s, want %s", loaded.Digest, built.Digest)
 	}
-	if loaded.Manifest.ID != built.Manifest.ID || len(loaded.Assets) != len(built.Assets) {
+	if loaded.Manifest.Identifier != built.Manifest.Identifier || len(loaded.Assets) != len(built.Assets) {
 		t.Fatalf("loaded package = %+v, want %+v", loaded, built)
 	}
 }
@@ -263,7 +263,7 @@ func TestVerifyRefusesAValidPackageOverTheByteBudget(t *testing.T) {
 	if !strings.Contains(err.Error(), "1048576") {
 		t.Fatalf("the refusal does not name the byte budget: %v", err)
 	}
-	if pkg.Digest != "" || pkg.Manifest.ID != "" || len(pkg.Assets) != 0 {
+	if pkg.Digest != "" || pkg.Manifest.Identifier != "" || len(pkg.Assets) != 0 {
 		t.Fatal("a refused package returned partial content")
 	}
 
@@ -292,7 +292,7 @@ func TestVerifyRefusesAValidPackageOverTheEntryBudget(t *testing.T) {
 	if !strings.Contains(err.Error(), "8 entries") {
 		t.Fatalf("the refusal does not name the entry budget: %v", err)
 	}
-	if pkg.Digest != "" || pkg.Manifest.ID != "" || len(pkg.Assets) != 0 {
+	if pkg.Digest != "" || pkg.Manifest.Identifier != "" || len(pkg.Assets) != 0 {
 		t.Fatal("a refused package returned partial content")
 	}
 

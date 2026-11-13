@@ -52,7 +52,7 @@ func TestPackageOverTheByteBudgetIsRefused(t *testing.T) {
 	if errors.Is(err, packaging.ErrDigestMismatch) {
 		t.Fatalf("the package was reported as a digest mismatch instead of unreadable: %v", err)
 	}
-	if refused.Digest != "" || refused.Manifest.ID != "" || len(refused.Assets) != 0 {
+	if refused.Digest != "" || refused.Manifest.Identifier != "" || len(refused.Assets) != 0 {
 		t.Fatal("a refused package returned partial content")
 	}
 
@@ -116,7 +116,7 @@ func TestPackageInsideTheBudgetStillPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify a package inside the budget: %v", err)
 	}
-	if loaded.Manifest.ID != built.Manifest.ID || len(loaded.Assets) != len(built.Assets) {
+	if loaded.Manifest.Identifier != built.Manifest.Identifier || len(loaded.Assets) != len(built.Assets) {
 		t.Fatalf("loaded package = %+v, want %+v", loaded, built)
 	}
 }

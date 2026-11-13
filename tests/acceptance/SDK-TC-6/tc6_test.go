@@ -38,7 +38,7 @@ func pack(t *testing.T, declaration map[string]any, assets []packaging.Asset) (p
 	t.Helper()
 	pkg, archive, err := packaging.Pack(declaration, assets)
 	if err != nil {
-		t.Fatalf("pack %v: %v", declaration["id"], err)
+		t.Fatalf("pack %v: %v", declaration["identifier"], err)
 	}
 	return pkg, archive
 }
@@ -110,8 +110,8 @@ func TestBothPackagesPassTheInstallPathChecks(t *testing.T) {
 			if err != nil {
 				t.Fatalf("install path rejected the package: %v", err)
 			}
-			if loaded.Manifest.ID != testCase.pkg.Manifest.ID {
-				t.Fatalf("loaded manifest id = %q, want %q", loaded.Manifest.ID, testCase.pkg.Manifest.ID)
+			if loaded.Manifest.Identifier != testCase.pkg.Manifest.Identifier {
+				t.Fatalf("loaded manifest id = %q, want %q", loaded.Manifest.Identifier, testCase.pkg.Manifest.Identifier)
 			}
 			if len(loaded.Assets) != len(testCase.pkg.Assets) {
 				t.Fatalf("loaded %d assets, want %d", len(loaded.Assets), len(testCase.pkg.Assets))

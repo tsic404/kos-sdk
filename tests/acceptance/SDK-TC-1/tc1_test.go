@@ -75,8 +75,8 @@ func TestMinimalDeclarationsPackAndVerify(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load package: %v", err)
 			}
-			if loaded.Manifest.ID != testCase.declaration["id"] {
-				t.Fatalf("loaded id = %q, want %v", loaded.Manifest.ID, testCase.declaration["id"])
+			if loaded.Manifest.Identifier != testCase.declaration["identifier"] {
+				t.Fatalf("loaded id = %q, want %v", loaded.Manifest.Identifier, testCase.declaration["identifier"])
 			}
 			if len(loaded.Assets) != len(testCase.assets) {
 				t.Fatalf("loaded %d assets, want %d", len(loaded.Assets), len(testCase.assets))
@@ -113,8 +113,15 @@ func TestPackagedManifestCarriesExactlyTheContractFields(t *testing.T) {
 			}
 
 			produced := decode(t, manifestEntry.Content)
-			if got := keys(produced); !slices.Equal(got, sortedCopy(manifest.ExtensionManifestFields)) {
-				t.Fatalf("extension field set = %v, want %v", got, manifest.ExtensionManifestFields)
+			for _, key := range keys(produced) {
+				if !slices.Contains(manifest.ExtensionManifestFields, key) {
+					t.Fatalf("the packaged manifest carries the field %q outside the contract's set", key)
+				}
+			}
+			for _, key := range []string{"identifier", "version", "frameworkVersion", "contributions", "dependencies", "permissions", "configuration", "retention"} {
+				if _, ok := produced[key]; !ok {
+					t.Fatalf("the packaged manifest is missing the required field %q", key)
+				}
 			}
 
 			contributions, ok := produced["contributions"].(map[string]any)

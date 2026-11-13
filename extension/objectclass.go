@@ -3,6 +3,8 @@
 package extension
 
 import (
+	"strings"
+
 	"github.com/tsic404/kos-sdk/validate"
 )
 
@@ -20,28 +22,59 @@ var CoreObjectKinds = []string{
 	"VolumeMigration",
 }
 
+// GroupKindFields is the class reference's closed field set.
+var GroupKindFields = []string{"group", "kind"}
+
+// GroupKind names one object class. An empty group is the run kernel's core
+// group, so a controller may name a core-group object without inventing one.
+type GroupKind struct {
+	Group string `json:"group,omitempty"`
+	Kind  string `json:"kind"`
+}
+
 // ObjectClassFields is the declaration's closed field set.
-var ObjectClassFields = []string{"apiGroup", "version", "kind", "scope"}
-
-// ObjectClassScopes are the scopes an extension object class may declare.
-var ObjectClassScopes = []string{"Namespaced", "Cluster"}
-
-// ObjectClassScope is the scope of an extension object class.
-type ObjectClassScope string
-
-const (
-	ScopeNamespaced ObjectClassScope = "Namespaced"
-	ScopeCluster    ObjectClassScope = "Cluster"
-)
+var ObjectClassFields = []string{"group", "kind", "resource", "versions", "namespaced", "references"}
 
 // ObjectClassDeclaration declares one extension object class. The class belongs
 // to the extension's own API group and is served only while its component is
-// installed.
+// installed (KOSD-C-19).
 type ObjectClassDeclaration struct {
-	APIGroup string           `json:"apiGroup"`
-	Version  string           `json:"version"`
-	Kind     string           `json:"kind"`
-	Scope    ObjectClassScope `json:"scope"`
+	Group      string   `json:"group"`
+	Kind       string   `json:"kind"`
+	Resource   string   `json:"resource"`
+	Versions   []string `json:"versions"`
+	Namespaced bool     `json:"namespaced,omitempty"`
+	References []string `json:"references,omitempty"`
+}
+
+// CheckGroupKind validates one class reference at path.
+func CheckGroupKind(c *validate.Checker, value any, path string) GroupKind {
+	record, ok := c.Record(value, path)
+	if !ok {
+		return GroupKind{}
+	}
+	c.RejectUnknown(record, GroupKindFields, path)
+
+	reference := GroupKind{}
+	reference.Kind, _ = c.RequireString(record, "kind", path)
+	reference.Group = checkOptionalGroup(c, record, path)
+	return reference
+}
+
+// checkOptionalGroup reads a group that may be empty: the empty group is the
+// core group the kernel declares for Node, Event and the other baseline kinds.
+func checkOptionalGroup(c *validate.Checker, record map[string]any, path string) string {
+	raw, present := c.Optional(record, "group")
+	if !present {
+		return ""
+	}
+	group, ok := raw.(string)
+	if !ok || strings.TrimSpace(group) != group {
+		c.Add(validate.Join(path, "group"), validate.CodeInvalidType,
+			"expected a string with no surrounding whitespace; the empty string is the core group")
+		return ""
+	}
+	return group
 }
 
 // CheckObjectClass validates a declaration at path.
@@ -53,10 +86,14 @@ func CheckObjectClass(c *validate.Checker, value any, path string) ObjectClassDe
 	c.RejectUnknown(record, ObjectClassFields, path)
 
 	declaration := ObjectClassDeclaration{}
-	declaration.APIGroup, _ = c.RequireString(record, "apiGroup", path)
-	declaration.Version, _ = c.RequireString(record, "version", path)
+	declaration.Group, _ = c.RequireString(record, "group", path)
 	declaration.Kind = checkKind(c, record, path)
-	declaration.Scope = checkScope(c, record, path)
+	declaration.Resource, _ = c.RequireString(record, "resource", path)
+	declaration.Versions, _ = c.RequireStringArray(record, "versions", path)
+	if raw, present := c.Optional(record, "namespaced"); present {
+		declaration.Namespaced, _ = c.Boolean(raw, validate.Join(path, "namespaced"))
+	}
+	declaration.References, _ = c.OptionalStringArray(record, "references", path)
 	return declaration
 }
 
@@ -84,23 +121,6 @@ func checkKind(c *validate.Checker, record map[string]any, path string) string {
 		return ""
 	}
 	return kind
-}
-
-func checkScope(c *validate.Checker, record map[string]any, path string) ObjectClassScope {
-	scope, ok := c.RequireString(record, "scope", path)
-	if !ok {
-		return ""
-	}
-	switch ObjectClassScope(scope) {
-	case ScopeNamespaced:
-		return ScopeNamespaced
-	case ScopeCluster:
-		return ScopeCluster
-	default:
-		c.Add(validate.Join(path, "scope"), validate.CodeInvalidValue,
-			"scope must be one of Namespaced, Cluster")
-		return ""
-	}
 }
 
 func isCoreKind(kind string) bool {
