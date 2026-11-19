@@ -121,11 +121,25 @@ type ComponentRequirement struct {
 // that contribution reads, the control-plane role it needs and the roles that
 // may write the extension's objects (KOSD-C-18).
 type ExtensionPermission struct {
-	Contribution  string    `json:"contribution"`
-	ReadScope     ReadScope `json:"readScope,omitempty"`
-	RequiredRole  string    `json:"requiredRole,omitempty"`
-	ObjectWriters []Role    `json:"objectWriters,omitempty"`
+	Contribution string    `json:"contribution"`
+	ReadScope    ReadScope `json:"readScope,omitempty"`
+	RequiredRole string    `json:"requiredRole,omitempty"`
+	// ObjectWriters lists the session roles that may write the extension's
+	// objects. A nil set is the form the declaration omits; a present set with
+	// no roles is the declaration that no session role may write the class, the
+	// global Owner included. The two forms mean different things, so the
+	// artifact keeps them apart instead of folding an empty set into an absent
+	// one (KOSD-C-18, KOSD-C-59).
+	ObjectWriters Roles `json:"objectWriters,omitzero"`
 }
+
+// Roles is a declared role set. The zero value is the form the declaration
+// omits; a non-nil set with no roles is a declared empty one.
+type Roles []Role
+
+// IsZero reports the omitted form. A declared empty set is not zero, so
+// packing writes it as an empty array instead of dropping the key.
+func (r Roles) IsZero() bool { return r == nil }
 
 // ReadScope is the read side of a declared permission: API groups and kinds.
 // An empty group is the core group, so reading Event or Node needs no invented
