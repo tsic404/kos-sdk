@@ -2,9 +2,11 @@ package packaging_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -323,4 +325,68 @@ func rewriteArchive(t *testing.T, archive []byte, mutate func([]fixtures.Entry) 
 		t.Fatalf("write archive: %v", err)
 	}
 	return rebuilt
+}
+
+// TestPackKeepsTheDeclaredWriterSetForms checks that packing neither invents a
+// writer set nor folds a declared empty one into an absent key (KOSD-C-18,
+// KOSD-C-59): the manifest the package carries keeps the key exactly as the
+// author declared it.
+func TestPackKeepsTheDeclaredWriterSetForms(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		roles  []any
+		want   []any
+		absent bool
+	}{
+		{name: "declared empty", roles: []any{}, want: []any{}},
+		{name: "declared owner and member", roles: []any{"Owner", "Member"}, want: []any{"Owner", "Member"}},
+		{name: "absent", absent: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			declaration := fixtures.MinimalExtension()
+			first := declaration["permissions"].([]any)[0].(map[string]any)
+			if testCase.absent {
+				delete(first, "objectWriters")
+			} else {
+				first["objectWriters"] = testCase.roles
+			}
+
+			built, archive, err := packaging.Pack(declaration, nil)
+			if err != nil {
+				t.Fatalf("pack declaration: %v", err)
+			}
+			declared := built.Manifest.Permissions[0].ObjectWriters
+			if testCase.absent != (declared == nil) {
+				t.Fatalf("validated writer set is nil = %v, want absent = %v", declared == nil, testCase.absent)
+			}
+
+			entries, err := fixtures.ReadArchive(archive)
+			if err != nil {
+				t.Fatalf("read archive: %v", err)
+			}
+			entry, ok := fixtures.Find(entries, packaging.ManifestEntry)
+			if !ok {
+				t.Fatal("the archive carries no manifest")
+			}
+			produced := map[string]any{}
+			if err := json.Unmarshal(entry.Content, &produced); err != nil {
+				t.Fatalf("decode manifest: %v", err)
+			}
+			permission := produced["permissions"].([]any)[0].(map[string]any)
+			roles, present := permission["objectWriters"]
+			if testCase.absent {
+				if present {
+					t.Fatalf("packing invented the writer set %v", roles)
+				}
+				return
+			}
+			list, ok := roles.([]any)
+			if !ok {
+				t.Fatalf("objectWriters = %v (%T), want an array", roles, roles)
+			}
+			if !reflect.DeepEqual(list, testCase.want) {
+				t.Fatalf("objectWriters = %v, want %v", list, testCase.want)
+			}
+		})
+	}
 }
