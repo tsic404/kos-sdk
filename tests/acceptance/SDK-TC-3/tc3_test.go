@@ -49,7 +49,7 @@ func tokenFor(permissions ...manifest.Permission) app.Token {
 	}
 }
 
-func theme() json.RawMessage { return json.RawMessage(`{"mode":"dark"}`) }
+func themeName() string { return "dark" }
 
 func newHost(t *testing.T, token app.Token, declared, granted []manifest.Permission) *app.Host {
 	t.Helper()
@@ -59,7 +59,7 @@ func newHost(t *testing.T, token app.Token, declared, granted []manifest.Permiss
 		Source:   windowSource,
 		Window:   "window-1",
 		Token:    token,
-		Theme:    theme(),
+		Theme:    themeName(),
 		Declared: declared,
 		Granted:  granted,
 		Now:      clock,
@@ -73,9 +73,9 @@ func newHost(t *testing.T, token app.Token, declared, granted []manifest.Permiss
 func newWindow(t *testing.T) *app.Window {
 	t.Helper()
 	window, err := app.NewWindow(app.WindowConfig{
-		AppID:         "files",
 		ConsoleOrigin: consoleOrigin + "/apps/files",
 		Parent:        parentSource,
+		Window:        "window-1",
 		Now:           clock,
 	})
 	if err != nil {
@@ -126,18 +126,14 @@ func TestValidAppCompletesHandshake(t *testing.T) {
 	if !slices.Equal(delivery.Message.Capabilities, granted) {
 		t.Fatalf("capabilities = %v, want %v", delivery.Message.Capabilities, granted)
 	}
-	if string(delivery.Message.Theme) != string(theme()) {
-		t.Fatalf("theme = %s, want %s", delivery.Message.Theme, theme())
+	if delivery.Message.Theme != themeName() {
+		t.Fatalf("theme = %s, want %s", delivery.Message.Theme, themeName())
 	}
 
-	// The init names the token, the theme and the capabilities, and nothing
-	// else: there is no field a console session could ride along in.
-	if got := jsonKeys(t, delivery.Message); !slices.Equal(got, []string{"capabilities", "theme", "token", "type"}) {
+	// The init names the token, the theme, the capabilities and the expiry, and
+	// nothing else: there is no field a console session could ride along in.
+	if got := jsonKeys(t, delivery.Message); !slices.Equal(got, []string{"capabilities", "expiresAt", "theme", "token", "type"}) {
 		t.Fatalf("init field set = %v", got)
-	}
-	if got := jsonKeys(t, delivery.Message.Token); !slices.Equal(got,
-		[]string{"account", "appId", "expiresAt", "permissions", "value", "window"}) {
-		t.Fatalf("token field set = %v", got)
 	}
 
 	session, err := window.Accept(app.Event{
@@ -148,8 +144,8 @@ func TestValidAppCompletesHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid init rejected: %v", err)
 	}
-	if session.Token.Value != "app-token-1" {
-		t.Fatalf("session token = %q", session.Token.Value)
+	if session.Token != "app-token-1" {
+		t.Fatalf("session token = %q", session.Token)
 	}
 	if !session.Allows(manifest.PermissionExternalLink) {
 		t.Fatal("a granted permission is not available to the app")
@@ -190,7 +186,7 @@ func TestUndeclaredPermissionIsNotAvailable(t *testing.T) {
 		Source:   windowSource,
 		Window:   "window-1",
 		Token:    tokenFor(manifest.PermissionClipboardRead, manifest.PermissionNotifications),
-		Theme:    theme(),
+		Theme:    themeName(),
 		Declared: declared,
 		Granted:  granted,
 		Now:      clock,
@@ -228,7 +224,7 @@ func TestPermissionOutsideFixedSetIsRejected(t *testing.T) {
 		Source:   windowSource,
 		Window:   "window-1",
 		Token:    tokenFor("camera"),
-		Theme:    theme(),
+		Theme:    themeName(),
 		Declared: []manifest.Permission{"camera"},
 		Granted:  []manifest.Permission{"camera"},
 		Now:      clock,
@@ -277,23 +273,25 @@ func TestMessagesFromAnotherOriginOrWindowAreIgnored(t *testing.T) {
 	if _, err := window.Accept(app.Event{Origin: consoleOrigin, Source: "other-window", Data: delivery.Message}); err == nil {
 		t.Fatal("an init from another window was accepted")
 	}
-	if _, err := window.Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: map[string]any{
-		"type": "init", "token": delivery.Message.Token, "theme": theme(),
-		"capabilities": granted, "cookie": "console-session",
-	}}); err == nil {
+	// An unknown field must be the only reason the message is refused, so this
+	// frame is the valid one with a single field added: same token, theme,
+	// capabilities and a current expiry.
+	extraField := onWireMap(t, delivery.Message)
+	extraField["cookie"] = "console-session"
+	if _, err := window.Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: extraField}); err == nil {
 		t.Fatal("an init carrying an extra field was accepted")
 	}
 
 	expired := delivery.Message
-	expired.Token.ExpiresAt = now.Add(-time.Minute)
+	expired.ExpiresAt = now.Add(-time.Minute)
 	if _, err := window.Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: expired}); err == nil {
 		t.Fatal("an expired token was accepted")
 	}
 
-	mismatched := delivery.Message
-	mismatched.Token.Permissions = []manifest.Permission{manifest.PermissionNotifications}
-	if _, err := window.Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: mismatched}); err == nil {
-		t.Fatal("an init whose token binds other permissions was accepted")
+	outsideSet := delivery.Message
+	outsideSet.Capabilities = []manifest.Permission{"camera"}
+	if _, err := window.Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: outsideSet}); err == nil {
+		t.Fatal("an init carrying a permission outside the fixed set was accepted")
 	}
 
 	if _, err := window.Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: delivery.Message}); err != nil {
@@ -309,7 +307,7 @@ func TestHostRefusesWildcardTargetOrigin(t *testing.T) {
 			Source:   windowSource,
 			Window:   "window-1",
 			Token:    tokenFor(),
-			Theme:    theme(),
+			Theme:    themeName(),
 			Declared: validApp(t).Permissions,
 			Granted:  nil,
 			Now:      clock,
@@ -331,7 +329,7 @@ func TestDefaultPortIsDroppedFromOrigin(t *testing.T) {
 		Source:   windowSource,
 		Window:   "window-1",
 		Token:    tokenFor(granted...),
-		Theme:    theme(),
+		Theme:    themeName(),
 		Declared: declared,
 		Granted:  granted,
 		Now:      clock,
@@ -340,9 +338,9 @@ func TestDefaultPortIsDroppedFromOrigin(t *testing.T) {
 		t.Fatalf("host rejected an entry carrying the default port: %v", err)
 	}
 	window, err := app.NewWindow(app.WindowConfig{
-		AppID:         "files",
 		ConsoleOrigin: consoleOrigin + ":443/",
 		Parent:        parentSource,
+		Window:        "window-1",
 		Now:           clock,
 	})
 	if err != nil {
@@ -367,7 +365,7 @@ func TestDefaultPortIsDroppedFromOrigin(t *testing.T) {
 		Source:   windowSource,
 		Window:   "window-1",
 		Token:    tokenFor(granted...),
-		Theme:    theme(),
+		Theme:    themeName(),
 		Declared: declared,
 		Granted:  granted,
 		Now:      clock,
@@ -405,7 +403,7 @@ func TestHandshakeWithNoPermissions(t *testing.T) {
 		Source:   windowSource,
 		Window:   "window-1",
 		Token:    tokenFor(),
-		Theme:    theme(),
+		Theme:    themeName(),
 		Declared: declared,
 		Granted:  nil,
 		Now:      clock,
@@ -463,7 +461,7 @@ func TestTokenBoundElsewhereIsRejected(t *testing.T) {
 			Source:   windowSource,
 			Window:   "window-1",
 			Token:    token,
-			Theme:    theme(),
+			Theme:    themeName(),
 			Declared: declared,
 			Granted:  granted,
 			Now:      clock,
@@ -483,20 +481,11 @@ func TestTokenBoundElsewhereIsRejected(t *testing.T) {
 	}
 
 	host := newHost(t, tokenFor(granted...), declared, granted)
-	delivery, ok := host.Receive(app.Event{Origin: appOrigin, Source: windowSource, Data: newWindow(t).Ready()})
-	if !ok {
+	if _, ok := host.Receive(app.Event{Origin: appOrigin, Source: windowSource, Data: newWindow(t).Ready()}); !ok {
 		t.Fatal("a ready from the embedded window was ignored")
 	}
 
-	foreignApp := delivery.Message
-	foreignApp.Token.AppID = "other-app"
-	if _, err := newWindow(t).Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: foreignApp}); err == nil {
-		t.Fatal("an init token bound to another app was accepted")
-	}
-
-	unbound := delivery.Message
-	unbound.Token.Window = ""
-	if _, err := newWindow(t).Accept(app.Event{Origin: consoleOrigin, Source: parentSource, Data: unbound}); err == nil {
-		t.Fatal("an init token not bound to a window instance was accepted")
-	}
+	// The opaque token carries no binding the app could read. The console
+	// rejects the actual token when it is used for another app or another
+	// window, so the SDK must not claim a binding it cannot check.
 }
