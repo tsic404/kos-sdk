@@ -58,7 +58,7 @@ kind 的 `group` 省略或留空表示核心组（如 `Event`、`Node`），不�
 | 通知 | `notifications` |
 | 剪贴板读 | `clipboard-read` |
 | 剪贴板写 | `clipboard-write` |
-| 文件选择 | `file-selection` |
+| 文件选择 | `file-picker` |
 | 外部链接 | `external-link` |
 
 `ValidateExtensionManifest` 与 `ValidateAppManifest` 返回清单或问题列表；问题逐条给出路径、错误码
@@ -84,16 +84,21 @@ kind 的 `group` 省略或留空表示核心组（如 `Event`、`Node`），不�
 
 ## 应用接口
 
-窗口应用经 `ready` / `init` 握手取得自己的短期令牌、主题与可用能力（`KOSD-C-75`）。
+窗口应用经 `ready` / `init` 握手取得自己的短期令牌、主题与可用能力（`KOSD-C-75`），并在存活期间上报
+存活与未保存（`KOSD-C-81`）。
 
 - `Window.Ready` 产出应用的 `ready`；`Host.Receive` 只回答来源为清单 `entry` 的 origin、发送者为所嵌入
   窗口的 `ready`，且每个窗口实例只回答一次。origin 归一化丢弃 https 默认端口 443，其余端口保留。
 - `Host` 的答复是 `Delivery`：目标 origin 恒为应用 origin，SDK 不产出通配来源。
-- `Window.Accept` 只接受来自控制台 origin 与父窗口、结构为 `init`、令牌未过期且绑定本应用的答复。
-- 两条消息的字段集合都是封闭的：`ready` 只有 `type`；`init` 只有 `type`、`token`、`theme`、`capabilities`。
-  未知消息、来源不符与多余字段一律忽略，应用没有向控制台传递 HTML 或脚本的通道。
+- `Window.Accept` 只接受来自控制台 origin 与父窗口、结构为 `init`、令牌未过期且权限名在固定集合内的答复。
+- 消息字段集合与控制台的 wire 一致：`ready` 是 `type` 与可选的 `window`；`init` 是 `type`、不透明字符串
+  `token`、字符串 `theme`、`capabilities` 与顶层 `expiresAt`。未知消息、来源不符与多余字段一律忽略，
+  应用没有向控制台传递 HTML 或脚本的通道。
 - 可用能力 = 清单声明的权限 ∩ 该窗口已确认的权限，按固定集合顺序给出；未声明的权限不可用。
-- 令牌绑定账号、应用、窗口实例、权限与到期时间，只在握手答复中出现一次。
+- 令牌是不透明字符串，绑定账号、应用、窗口实例、权限与到期时间；绑定由控制台在令牌被使用时校验，
+  应用侧只能校验结构与到期时间。
+- `Window.Ready`、`Window.Alive` 与 `Window.Unsaved` 都带窗口实例 `window`。`Window.Alive` 按
+  `AliveInterval` 上报，间隔小于控制台的判定窗口；`Window.Unsaved(true)` 否决窗口的第一次关闭。
 - 接口面不含读取控制台会话的入口：`app` 包只依赖清单类型，模块不引入集群客户端或 Cookie 存储。
 
 ## 打包

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -24,7 +23,7 @@ type HostConfig struct {
 	// Token is the short-lived token the console issued for this window.
 	Token Token
 	// Theme is the console's current appearance, passed through unchanged.
-	Theme json.RawMessage
+	Theme string
 	// Declared is the permission list of the App manifest.
 	Declared []manifest.Permission
 	// Granted is the subset the user confirmed for this window.
@@ -40,6 +39,7 @@ type Host struct {
 	mu        sync.Mutex
 	origin    string
 	source    Source
+	window    string
 	delivered bool
 	init      Init
 }
@@ -61,7 +61,7 @@ func NewHost(config HostConfig) (*Host, error) {
 	if config.Window == "" {
 		return nil, fmt.Errorf("app: host needs a window instance id")
 	}
-	if len(config.Theme) == 0 || string(config.Theme) == "null" {
+	if config.Theme == "" {
 		return nil, fmt.Errorf("app: host needs a theme for the init message")
 	}
 	available, err := capabilities(config.Declared, config.Granted)
@@ -85,11 +85,13 @@ func NewHost(config HostConfig) (*Host, error) {
 	return &Host{
 		origin: origin,
 		source: config.Source,
+		window: config.Window,
 		init: Init{
 			Type:         TypeInit,
-			Token:        token,
-			Theme:        slices.Clone(config.Theme),
+			Token:        token.Value,
+			Theme:        config.Theme,
 			Capabilities: slices.Clone(available),
+			ExpiresAt:    token.ExpiresAt,
 		},
 	}, nil
 }
@@ -107,8 +109,11 @@ func (h *Host) Receive(event Event) (Delivery, bool) {
 	if event.Origin != h.origin || event.Source != h.source {
 		return Delivery{}, false
 	}
-	var ready Ready
-	if !decodeClosed(event.Data, &ready) || ready.Type != TypeReady {
+	ready, ok := decodeReady(event.Data)
+	if !ok {
+		return Delivery{}, false
+	}
+	if ready.Window != "" && ready.Window != h.window {
 		return Delivery{}, false
 	}
 	h.delivered = true

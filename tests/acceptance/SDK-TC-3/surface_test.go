@@ -59,6 +59,8 @@ func TestInterfaceSurfaceHasNoConsoleSessionEntry(t *testing.T) {
 
 	// The app interface is closed: an app reaches exactly these entries.
 	wantApp := []string{
+		"Alive",
+		"AliveInterval",
 		"Delivery",
 		"Event",
 		"Host",
@@ -73,11 +75,16 @@ func TestInterfaceSurfaceHasNoConsoleSessionEntry(t *testing.T) {
 		"Session.Allows",
 		"Source",
 		"Token",
+		"TypeAlive",
 		"TypeInit",
 		"TypeReady",
+		"TypeUnsaved",
+		"Unsaved",
 		"Window",
 		"Window.Accept",
+		"Window.Alive",
 		"Window.Ready",
+		"Window.Unsaved",
 		"WindowConfig",
 	}
 	if got := surface["app"]; !slices.Equal(got, wantApp) {

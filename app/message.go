@@ -27,12 +27,39 @@ const (
 	// TypeInit is the console's answer: the app token, the theme and the
 	// capabilities the app may use.
 	TypeInit MessageType = "init"
+	// TypeAlive is the app's liveness report (KOSD-C-81).
+	TypeAlive MessageType = "alive"
+	// TypeUnsaved is the app's unsaved-changes report (KOSD-C-81).
+	TypeUnsaved MessageType = "unsaved"
 )
 
-// Ready is the app's handshake message. It carries no other field, so an app
-// hands the console no markup and no script (KOSD-C-75).
+// AliveInterval is how often an app reports alive. It stays well inside the
+// console's decision window (DASH-C-74), so a running window never looks stopped.
+const AliveInterval = 10 * time.Second
+
+// Ready is the app's handshake message. Window optionally names the window
+// instance; when empty the console attributes the message to the iframe it came
+// from (KOSD-C-81). It carries no other field, so an app hands the console no
+// markup and no script (KOSD-C-75).
 type Ready struct {
-	Type MessageType `json:"type"`
+	Type   MessageType `json:"type"`
+	Window string      `json:"window,omitempty"`
+}
+
+// Alive is the app's liveness report (KOSD-C-81). The console marks a window
+// stopped when it stays silent longer than its decision window, so the app
+// reports at AliveInterval for as long as the window runs.
+type Alive struct {
+	Type   MessageType `json:"type"`
+	Window string      `json:"window,omitempty"`
+}
+
+// Unsaved is the app's unsaved-changes report (KOSD-C-81). True keeps the
+// console from closing the window on the first close request.
+type Unsaved struct {
+	Type    MessageType `json:"type"`
+	Unsaved bool        `json:"unsaved"`
+	Window  string      `json:"window,omitempty"`
 }
 
 // Source identifies the window a message came from (event.source, KOSD-C-75).
@@ -48,10 +75,11 @@ type Event struct {
 	Data   any
 }
 
-// Token is the short-lived application token of one window instance
-// (KOSD-C-75). It binds the account, the app, the window instance, the
-// permissions and an expiry; the console issues it and the control plane keeps
-// only its digest. The value crosses the handshake once.
+// Token is the console-side record of one window instance's short-lived
+// application token (KOSD-C-75). It binds the account, the app, the window
+// instance, the permissions and an expiry; the control plane keeps only its
+// digest. Only Value crosses the handshake, so the app cannot read these
+// bindings and the console enforces them when the token is used.
 type Token struct {
 	Value       string                `json:"value"`
 	Account     string                `json:"account"`
@@ -61,13 +89,16 @@ type Token struct {
 	ExpiresAt   time.Time             `json:"expiresAt"`
 }
 
-// Init is the console's handshake answer (KOSD-C-75). Its field set is closed
-// and carries no console session material.
+// Init is the console's handshake answer in the console's wire shape
+// (KOSD-C-75): the opaque token, the theme, the capabilities the app may use and
+// the token's expiry. Its field set is closed and carries no console session
+// material.
 type Init struct {
 	Type         MessageType           `json:"type"`
-	Token        Token                 `json:"token"`
-	Theme        json.RawMessage       `json:"theme"`
+	Token        string                `json:"token"`
+	Theme        string                `json:"theme"`
 	Capabilities []manifest.Permission `json:"capabilities"`
+	ExpiresAt    time.Time             `json:"expiresAt"`
 }
 
 // Delivery is the init message and the exact origin it is posted to. The SDK
@@ -87,6 +118,45 @@ func decodeClosed(value any, target any) bool {
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(target) == nil
+}
+
+// decodeReady decodes a ready message. The type is required and must be the
+// string "ready": a missing type or a JSON null would otherwise pass as the zero
+// value, and a null window would land on the empty string and pass as an absent
+// field, so the host would answer a message the console ignores and spend the
+// one-shot handshake on it (KOSD-C-75, KOSD-C-81).
+func decodeReady(value any) (Ready, bool) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return Ready{}, false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return Ready{}, false
+	}
+	rawType, named := fields["type"]
+	if !named || len(rawType) == 0 || rawType[0] != '"' {
+		return Ready{}, false
+	}
+	var ready Ready
+	if err := json.Unmarshal(rawType, &ready.Type); err != nil || ready.Type != TypeReady {
+		return Ready{}, false
+	}
+	for name, raw := range fields {
+		switch name {
+		case "type":
+		case "window":
+			if len(raw) == 0 || raw[0] != '"' {
+				return Ready{}, false
+			}
+			if err := json.Unmarshal(raw, &ready.Window); err != nil {
+				return Ready{}, false
+			}
+		default:
+			return Ready{}, false
+		}
+	}
+	return ready, true
 }
 
 // originOf reduces an absolute https address to the origin a postMessage event

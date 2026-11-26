@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sync"
@@ -12,13 +11,14 @@ import (
 
 // WindowConfig configures the app side of one window instance's handshake.
 type WindowConfig struct {
-	// AppID is the App's manifest identifier; the init token must match it.
-	AppID string
 	// ConsoleOrigin is the origin of the console that embeds the app; only its
 	// origin is accepted as the origin of an inbound event.
 	ConsoleOrigin string
 	// Parent is the embedding window (event.source of an inbound event).
 	Parent Source
+	// Window is the window instance identifier the console embedded; every
+	// report names it so the console can attribute it (KOSD-C-81).
+	Window string
 	// Now supplies the current time; nil uses time.Now.
 	Now func() time.Time
 }
@@ -28,9 +28,9 @@ type WindowConfig struct {
 // concurrent use.
 type Window struct {
 	mu       sync.Mutex
-	appID    string
 	origin   string
 	parent   Source
+	window   string
 	now      func() time.Time
 	accepted bool
 }
@@ -38,9 +38,6 @@ type Window struct {
 // NewWindow builds the app side, rejecting a configuration that could not
 // verify the console it expects.
 func NewWindow(config WindowConfig) (*Window, error) {
-	if config.AppID == "" {
-		return nil, fmt.Errorf("app: window needs an app id")
-	}
 	origin, err := originOf(config.ConsoleOrigin)
 	if err != nil {
 		return nil, err
@@ -48,16 +45,34 @@ func NewWindow(config WindowConfig) (*Window, error) {
 	if config.Parent == "" {
 		return nil, fmt.Errorf("app: window needs the embedding window's source")
 	}
+	if config.Window == "" {
+		return nil, fmt.Errorf("app: window needs a window instance id")
+	}
 	now := config.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &Window{appID: config.AppID, origin: origin, parent: config.Parent, now: now}, nil
+	return &Window{origin: origin, parent: config.Parent, window: config.Window, now: now}, nil
 }
 
-// Ready is the message the app posts to the console once it has loaded.
+// Ready is the message the app posts to the console once it has loaded. It
+// names this window instance (KOSD-C-81).
 func (w *Window) Ready() Ready {
-	return Ready{Type: TypeReady}
+	return Ready{Type: TypeReady, Window: w.window}
+}
+
+// Alive is the liveness report the app posts while the window runs
+// (KOSD-C-81). Post it after Accept has succeeded; the console ignores reports
+// before the handshake.
+func (w *Window) Alive() Alive {
+	return Alive{Type: TypeAlive, Window: w.window}
+}
+
+// Unsaved is the unsaved-changes report the app posts when its state changes
+// (KOSD-C-81). Post it after Accept has succeeded; the console ignores reports
+// before the handshake.
+func (w *Window) Unsaved(unsaved bool) Unsaved {
+	return Unsaved{Type: TypeUnsaved, Unsaved: unsaved, Window: w.window}
 }
 
 // Accept checks one inbound event as the console's init. An event from another
@@ -80,24 +95,26 @@ func (w *Window) Accept(event Event) (Session, error) {
 	if !decodeClosed(event.Data, &init) || init.Type != TypeInit {
 		return Session{}, fmt.Errorf("app: event data is not an init message")
 	}
-	if err := checkInit(init, w.appID, w.now()); err != nil {
+	if err := checkInit(init, w.now()); err != nil {
 		return Session{}, err
 	}
 	w.accepted = true
 	return Session{
 		Token:        init.Token,
-		Theme:        slices.Clone(init.Theme),
+		Theme:        init.Theme,
 		Capabilities: slices.Clone(init.Capabilities),
+		ExpiresAt:    init.ExpiresAt,
 	}, nil
 }
 
-// Session is the app's own session after the handshake: the window's app token,
-// the console theme and the capabilities the app may use. It holds no console
-// session material.
+// Session is the app's own session after the handshake: the window's opaque app
+// token, the console theme, the capabilities the app may use and the token's
+// expiry. It holds no console session material.
 type Session struct {
-	Token        Token
-	Theme        json.RawMessage
+	Token        string
+	Theme        string
 	Capabilities []manifest.Permission
+	ExpiresAt    time.Time
 }
 
 // Allows reports whether this window may use permission. A permission the App
@@ -106,22 +123,16 @@ func (s Session) Allows(permission manifest.Permission) bool {
 	return slices.Contains(s.Capabilities, permission)
 }
 
-// checkInit verifies an init against this window: the token must belong to the
-// app, be bound to a window instance, bind exactly the capabilities delivered,
-// and still be current (KOSD-C-75).
-func checkInit(init Init, appID string, now time.Time) error {
-	token := init.Token
-	if token.Value == "" {
-		return fmt.Errorf("app: init token value is empty")
+// checkInit verifies an init against this window: it must carry a token, a
+// theme and a capability list inside the fixed set, and the token must still be
+// current (KOSD-C-75). The token is opaque, so its bindings are enforced by the
+// console when the app uses it.
+func checkInit(init Init, now time.Time) error {
+	if init.Token == "" {
+		return fmt.Errorf("app: init token is empty")
 	}
-	if token.Account == "" {
-		return fmt.Errorf("app: init token is not bound to an account")
-	}
-	if token.AppID != appID {
-		return fmt.Errorf("app: init token belongs to app %q, not %q", token.AppID, appID)
-	}
-	if token.Window == "" {
-		return fmt.Errorf("app: init token is not bound to a window instance")
+	if init.Theme == "" {
+		return fmt.Errorf("app: init carries no theme")
 	}
 	if init.Capabilities == nil {
 		return fmt.Errorf("app: init carries no capability list")
@@ -129,15 +140,8 @@ func checkInit(init Init, appID string, now time.Time) error {
 	if err := checkPermissionSet(init.Capabilities); err != nil {
 		return err
 	}
-	if !samePermissions(token.Permissions, init.Capabilities) {
-		return fmt.Errorf("app: init token permissions %v do not match the capabilities %v",
-			token.Permissions, init.Capabilities)
-	}
-	if len(init.Theme) == 0 || string(init.Theme) == "null" {
-		return fmt.Errorf("app: init carries no theme")
-	}
-	if !token.ExpiresAt.After(now) {
-		return fmt.Errorf("app: init token expired at %s", token.ExpiresAt.Format(time.RFC3339))
+	if !init.ExpiresAt.After(now) {
+		return fmt.Errorf("app: init token expired at %s", init.ExpiresAt.Format(time.RFC3339))
 	}
 	return nil
 }
